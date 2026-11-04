@@ -4,4 +4,4 @@
 
 Откройте `index.html` в браузере. Страница самодостаточна, изображение встроено в файл.
 
-Руководитель проекта Flowlink: Василий Николаевич Попков, otchet_ef@mail.ru
+Руководитель проекта Flowlink: A.Perevedencev, a.perevedencev@gmail.com
