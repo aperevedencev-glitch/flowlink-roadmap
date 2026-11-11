@@ -59,7 +59,8 @@ def _row(r: ReconciledRecord) -> dict:
     }
 
 
-def write_operator_workbook(records: list[ReconciledRecord], path: Path, sro_name: str = "") -> Path:
+def write_operator_workbook(records: list[ReconciledRecord], path: Path, sro_name: str = "",
+                            excluded: list | None = None, members: dict | None = None) -> Path:
     wb = Workbook()
     thin = Side(style="thin", color="C9CED6")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -108,6 +109,8 @@ def write_operator_workbook(records: list[ReconciledRecord], path: Path, sro_nam
         summary.append([st, counts.get(st, 0), ACTIONS[st]])
         summary.cell(summary.max_row, 1).fill = PatternFill("solid", fgColor=FILL[st])
     summary.append(["Всего", len(records), ""])
+    if excluded is not None:
+        summary.append(["Исключены роботом", len(excluded), "Не подряд по ГрК, текущий ремонт, ресурсоснабжение — проверить при сомнении"])
     summary.cell(summary.max_row, 1).font = Font(name="Arial", bold=True)
     for col, w in (("A", 22), ("B", 10), ("C", 36)):
         summary.column_dimensions[col].width = w
@@ -120,6 +123,43 @@ def write_operator_workbook(records: list[ReconciledRecord], path: Path, sro_nam
     sheet(wb.create_sheet("Требуют решения"), "Требуют решения оператора",
           [r for r in records if r.status in (NEEDS_CHECK, PROBABLE, MISMATCH, DECLARED)])
     sheet(wb.create_sheet("Все записи"), "Все записи", records)
+    if excluded is not None:
+        ws = wb.create_sheet("Исключены роботом")
+        ws.append(["Исключены роботом: в сверку и пакет не попадают"])
+        ws["A1"].font = Font(name="Arial", size=13, bold=True, color="1F3A5F")
+        ws.append([f"Сформировано {datetime.now():%d.%m.%Y %H:%M}. Записей: {len(excluded)}. "
+                   "Договоры, исключённые до 11.11.2026, сюда не попали: журнал исключений ведётся с этой даты."])
+        ws.append([])
+        cols = ["Причина исключения", "Закон", "ИНН члена СРО", "Член СРО", "Реестровый номер",
+                "Заказчик", "Дата заключения", "Цена, ₽", "Предмет договора", "Карточка в ЕИС"]
+        ws.append(cols)
+        for j, w in enumerate((44, 8, 14, 34, 25, 36, 14, 16, 60, 30), 1):
+            cell = ws.cell(4, j)
+            cell.font = Font(name="Arial", bold=True, color="FFFFFF")
+            cell.fill = head_fill
+            cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
+            cell.border = border
+            ws.column_dimensions[cell.column_letter].width = w
+        for c, reason in excluded:
+            m = (members or {}).get(c.supplier_inn)
+            url = ""
+            if c.reg_number and c.law == "44":
+                url = f"https://zakupki.gov.ru/epz/contract/contractCard/common-info.html?reestrNumber={c.reg_number}"
+            elif c.reg_number and c.law == "223":
+                url = f"https://zakupki.gov.ru/223/contract/public/contract/view/general-information.html?id=&regNumber={c.reg_number}"
+            ws.append([reason, c.law, c.supplier_inn, getattr(m, "name", "") if m else "", c.reg_number,
+                       c.customer_name, c.sign_date, c.price, c.subject, url])
+            row = ws.max_row
+            for j in range(1, len(cols) + 1):
+                cell = ws.cell(row, j)
+                cell.font = Font(name="Arial", size=10)
+                cell.border = border
+                cell.alignment = Alignment(vertical="top", wrap_text=j in (1, 4, 6, 9))
+            ws.cell(row, 7).number_format = "DD.MM.YYYY"
+            ws.cell(row, 8).number_format = "#,##0.00"
+        ws.freeze_panes = "B5"
+        if excluded:
+            ws.auto_filter.ref = f"A4:J{ws.max_row}"
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
     return path

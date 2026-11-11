@@ -772,3 +772,48 @@ class ResourceSupplyTests(unittest.TestCase):
         c.extra["grk"] = "Нет данных"
         recs = reconcile({MEMBER: Member(MEMBER, "ООО Тест")}, [c], date(2017, 7, 1), date(2026, 3, 1))
         self.assertEqual(recs[0].status, NEEDS_CHECK)
+
+
+class ExcludedSheetTests(unittest.TestCase):
+    """11.11: исключённые договоры пропадали из виду — теперь журнал и лист «Исключены роботом»."""
+
+    def test_log_dedupes_and_reports(self):
+        from eis2nostroy.excluded import ExcludedLog, for_report
+        with tempfile.TemporaryDirectory() as tmp:
+            log = ExcludedLog(Path(tmp) / "excluded.jsonl")
+            c = parse_contract_xml(contract_xml(MEMBER), "44", {MEMBER})[0]
+            self.assertEqual(log.add([(c, "не работы по ГрК")]), 1)
+            self.assertEqual(ExcludedLog(log.path).add([(c, "не работы по ГрК")]), 0)   # повтор не пишется
+            rows = for_report(ExcludedLog(log.path), {MEMBER: Member(MEMBER, "ООО Тест")}, date(2017, 7, 1), set())
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(for_report(log, {MEMBER: Member(MEMBER)}, date(2017, 7, 1), {c.reg_number}), [])
+
+    def test_targeted223_by_number_marks_found(self):
+        from types import SimpleNamespace
+        from eis2nostroy.targeted44 import cmd_targeted44
+        from openpyxl import Workbook
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            wb = Workbook(); ws = wb.active
+            ws.append(["Реестровый номер", "Дата заключения", "ИНН члена СРО"])
+            ws.append(["54716016979180027840000", date(2018, 6, 18), MEMBER])
+            wb.save(tmp / "list.xlsx")
+            (tmp / "m.csv").write_text("ИНН;Наименование\n%s;ООО Тест\n" % MEMBER, encoding="utf-8")
+            feed = SimpleNamespace(law="223", kind="contract", subsystem="RD223")
+            cfg = SimpleNamespace(feeds=[feed], raw={}, path=lambda k: {"members": tmp / "m.csv", "output_dir": tmp, "work_dir": tmp}.get(k))
+            asked = []
+
+            class Client:
+                def fetch_by_reestr(self, sub, reg, law):
+                    asked.append((sub, reg, law)); return []
+
+                def unpurge_days(self, *a, **k):
+                    return 0
+
+            class Store:
+                def add(self, items): return 0
+                def compact(self): pass
+                def load(self): return []
+            added, errors = cmd_targeted44(cfg, tmp / "list.xlsx", 10, Store(), lambda cfg, c: c, client=Client(), law="223")
+            self.assertEqual(asked, [("RD223", "54716016979180027840000", "223")])
+            self.assertTrue(list(tmp.glob("targeted223_по_номерам_*.xlsx")))

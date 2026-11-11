@@ -43,6 +43,11 @@ def _store(cfg: Config) -> ContractStore:
     return ContractStore((cfg.path("work_dir") or Path("data/work")) / "eis_contracts.jsonl")
 
 
+def _excluded(cfg: Config):
+    from .excluded import ExcludedLog
+    return ExcludedLog((cfg.path("work_dir") or Path("data/work")) / "excluded.jsonl")
+
+
 def _wins(cfg: Config) -> WinStore:
     return WinStore((cfg.path("work_dir") or Path("data/work")) / "protocol_wins.jsonl")
 
@@ -113,20 +118,29 @@ def _keep(cfg: Config, contracts: list) -> list:
     if not _grk_only(cfg):
         return contracts
     from .grk import NOT_GRK, UNKNOWN, current_repair_reason, resource_supply_reason
-    kept, repair = [], 0
+    kept, repair, dropped = [], 0, []
     for c in contracts:
         if c.extra.get("grk") == NOT_GRK:
+            dropped.append((c, "не работы по ГрК: " + (c.extra.get("grk_note") or "по коду ОКПД2 и предмету")))
             continue
         # договоры без кода ОКПД2, сохранённые до правила о ресурсоснабжении (10.11)
         if c.extra.get("grk") == UNKNOWN and resource_supply_reason(c.subject):
             repair += 1
+            dropped.append((c, resource_supply_reason(c.subject) + ", кода ОКПД2 нет"))
             continue
         # текущий ремонт и содержание не сверяются с НОСТРОЙ, даже в записях,
         # сохранённых до появления этого правила
-        if cfg.raw.get("grk", {}).get("exclude_current_repair", True) and current_repair_reason(c.subject):
+        why = current_repair_reason(c.subject) if cfg.raw.get("grk", {}).get("exclude_current_repair", True) else ""
+        if why:
             repair += 1
+            dropped.append((c, "текущий ремонт и содержание: " + why))
             continue
         kept.append(c)
+    if dropped:
+        try:
+            _excluded(cfg).add(dropped)
+        except OSError as exc:
+            log.warning("журнал исключённых договоров не записан: %s", exc)
     if repair:
         log.info("Исключено договоров текущего ремонта, содержания и ресурсоснабжения: %s", repair)
     return kept
@@ -789,8 +803,12 @@ def cmd_reconcile(cfg: Config):
              "Уже в НОСТРОЙ: %s, изменились после передачи: %s",
              dstat["send"], dstat["exclude"], dstat["wait"], added, jstat["sent"], jstat["changed"])
     out = cfg.path("output_dir") or Path("data/out")
+    from .excluded import for_report
+    shown = {r.primary.reg_number for r in records if getattr(r, "primary", None) and r.primary.reg_number}
+    excluded = for_report(_excluded(cfg), members, cfg.competitive_from, shown)
+    log.info("Исключены роботом (лист в файле сверки): %s", len(excluded))
     book = write_operator_workbook(records, out / f"sverka_{date.today():%Y%m%d}.xlsx",
-                                   cfg.raw.get("sro", {}).get("name", ""))
+                                   cfg.raw.get("sro", {}).get("name", ""), excluded=excluded, members=members)
     sent = NostroyTransport(cfg.nostroy, out).send(records)
     counts = {s: sum(r.status == s for r in records)
               for s in (CONFIRMED, NEEDS_CHECK, PROBABLE, MISMATCH, DECLARED, IN_NOSTROY, EXCLUDED)}
@@ -827,6 +845,7 @@ def main(argv=None) -> int:
     t4 = sub.add_parser("targeted44", help="точечная загрузка 44-ФЗ по списку реестровых номеров")
     t4.add_argument("file", type=Path, help="Excel с колонками «Реестровый номер» и «Дата заключения»")
     t4.add_argument("--window", type=int, default=10, help="дней после даты заключения при поиске по дням")
+    t4.add_argument("--law", choices=("44", "223"), default="44", help="223 — договоры 223-ФЗ по номеру, без поиска по дням")
     sub.add_parser("subjects223", help="дописать предмет договорам 223-ФЗ из извещений ЕИС")
     au = sub.add_parser("audit223", help="отчёт по каждому договору списка, без запросов в ЕИС")
     au.add_argument("file", type=Path, help="Excel со списком договоров")
@@ -886,7 +905,7 @@ def _main_locked(cfg: Config, args) -> int:
             return 1 if errors else 0
         if args.cmd == "targeted44":
             from .targeted44 import cmd_targeted44
-            _, errors = cmd_targeted44(cfg, args.file, args.window, _store(cfg), _keep)
+            _, errors = cmd_targeted44(cfg, args.file, args.window, _store(cfg), _keep, law=args.law)
             return 1 if errors else 0
         if args.cmd == "subjects223":
             from .enrich import cmd_subjects223

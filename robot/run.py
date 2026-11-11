@@ -23,6 +23,7 @@
     python run.py subjects223  — дописать предмет договорам 223-ФЗ из извещений и сверить
     python run.py audit223     — отчёт по каждому договору списка, без запросов в ЕИС
     python run.py targeted44   — точечная загрузка 44-ФЗ по списку в папке data
+    python run.py targeted223reg — догрузка 223-ФЗ по реестровым номерам (data/Догрузка 223-ФЗ по номерам.xlsx)
     python run.py roles44      — роль члена СРО в договорах 44-ФЗ, выпавших при пересборке
     python run.py versions     — договоры, чья новая версия не прошла отбор; перед загрузкой в НОСТРОЙ
     python run.py missing223   — поискать ненайденные договоры с окном 60 дней и сверить
@@ -265,6 +266,19 @@ def main():
         if rc != 3:
             cli.main(["-c", "config.toml", "reconcile"])
         return rc
+    if cmd == "targeted223reg":
+        # 11.11: договоры 223-ФЗ, которые не нашлись поиском по дням, — запрос по реестровому номеру
+        lst = HERE / "data" / "Догрузка 223-ФЗ по номерам.xlsx"
+        if not lst.exists():
+            print("Нет списка: положите в папку data файл «Догрузка 223-ФЗ по номерам.xlsx» "
+                  "с колонками «Реестровый номер» и «Дата заключения».")
+            return 1
+        print(f"Список: {lst.name}")
+        need_token()
+        rc = cli.main(["-c", "config.toml", "targeted44", str(lst), "--law", "223"])
+        if rc != 3:
+            cli.main(["-c", "config.toml", "reconcile"])
+        return rc
     if cmd == "targeted223":
         if len(sys.argv) > 2:
             lst = Path(sys.argv[2])
@@ -349,8 +363,8 @@ def main():
     return 2
 
 
-LONG = ("load", "history223", "ranges", "rebuild", "history", "daily", "targeted223", "targeted44")
-NOTIFY = ("load", "history223", "ranges", "rebuild", "history", "targeted223", "targeted44")  # daily оповещает сам
+LONG = ("load", "history223", "ranges", "rebuild", "history", "daily", "targeted223", "targeted44", "targeted223reg")
+NOTIFY = ("load", "history223", "ranges", "rebuild", "history", "targeted223", "targeted44", "targeted223reg")  # daily оповещает сам
 
 if __name__ == "__main__":
     try:
