@@ -774,6 +774,31 @@ class ResourceSupplyTests(unittest.TestCase):
         self.assertEqual(recs[0].status, NEEDS_CHECK)
 
 
+class KtruTests(unittest.TestCase):
+    """12.11: 41 договор «Т Плюс» без ОКПД2 — код был в <KTRU>, предмета в договоре нет."""
+
+    XML = ("<export><contract><regNum>3583502432119000009</regNum><signDate>2019-01-30</signDate>"
+           "<priceInfo><price>2036290.07</price></priceInfo>"
+           "<customer><inn>5835024321</inn><fullName>МБДОУ Детский сад</fullName></customer>"
+           "<products><product><KTRU><code>{code}</code><name>x</name></KTRU><name>{name}</name></product></products>"
+           "<suppliers><supplier><legalEntityRF><INN>{inn}</INN><fullName>ПАО Т Плюс</fullName></legalEntityRF></supplier></suppliers>"
+           "</contract></export>")
+
+    def _parse(self, code, name):
+        return parse_contract_xml(self.XML.format(code=code, name=name, inn=MEMBER).encode(), "44", {MEMBER})[0]
+
+    def test_ktru_heat_supply_is_not_grk(self):
+        c = self._parse("35.30.10.000-00000004", "Услуги по отоплению")
+        self.assertEqual(c.extra["okpd2"], ["35.30.10.000"])
+        self.assertEqual(c.extra["grk"], "Не ГрК")
+        self.assertEqual(c.subject, "Услуги по отоплению")
+
+    def test_ktru_networks_are_construction(self):
+        c = self._parse("42.21.10.000-00000003", "Коммуникации инженерные для жидкостей и газов")
+        self.assertEqual(c.extra["okpd2"], ["42.21.10.000"])
+        self.assertIn(c.extra["grk"], ("ГрК", "Вероятно ГрК"))
+
+
 class ExcludedSheetTests(unittest.TestCase):
     """11.11: исключённые договоры пропадали из виду — теперь журнал и лист «Исключены роботом»."""
 

@@ -143,6 +143,17 @@ def _customer_name(root: ET.Element, blocks: list[ET.Element], customer_inn: str
     return ""
 
 
+def product_names(root: ET.Element) -> str:
+    """Предмет из наименований позиций, если в договоре нет поля предмета (схема 9.x)."""
+    names = []
+    for e in root.iter():
+        if _local(e.tag) == "product":
+            for c in e:
+                if _local(c.tag) == "name" and c.text and c.text.strip() and c.text.strip() not in names:
+                    names.append(c.text.strip())
+    return "; ".join(names)
+
+
 def grk_info(root: ET.Element, subject: str = "") -> dict:
     """ИКЗ, коды ОКПД2 позиций и отнесение к ГрК (см. grk.py)."""
     ikz = ""
@@ -154,10 +165,13 @@ def grk_info(root: ET.Element, subject: str = "") -> dict:
                 break
     okpd = []
     for e in root.iter():
-        if "okpd" in _local(e.tag):
+        tag = _local(e.tag)
+        # <OKPD2>/<okpd2okved2> — код ОКПД2; <KTRU> — код КТРУ «35.30.10.000-00000004»,
+        # его часть до дефиса и есть ОКПД2 (договоры 2019–2021 годов часто только с КТРУ)
+        if "okpd" in tag or tag == "ktru":
             for c in e.iter():
                 if _local(c.tag) in ("code", "okpdcode") and c.text and c.text.strip()[:2].isdigit():
-                    okpd.append(c.text.strip())
+                    okpd.append(c.text.strip().split("-")[0])
     cls, note = grk_classify(ikz, okpd, subject=subject)
     return {"ikz": ikz, "okpd2": sorted(set(okpd))[:5], "grk": cls, "grk_note": note}
 
@@ -195,7 +209,7 @@ def parse_contract_xml(data: bytes, law: str, member_inns: set[str], raw_file: s
         if _local(e.tag) in PRICE and e.text and to_float(e.text) is not None:
             price_el = e
             break
-    subject = _first_text(root, SUBJECT)[:500]
+    subject = _first_text(root, SUBJECT)[:500] or product_names(root)[:500]
     info = grk_info(root, subject)
     if str(law) == "615":
         # ПП-615 — капремонт общего имущества МКД: всегда ГрК, членство в СРО обязательно (ч. 7 ст. 166 ЖК)
