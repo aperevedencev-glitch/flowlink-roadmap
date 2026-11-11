@@ -35,7 +35,15 @@ CONSTRUCTION = ("41.2", "42.", "43.")
 EXCLUDED = ("41.1",)
 # КВР: 243 — закупка в целях капитального ремонта; 4xx — капитальные вложения
 # (например, 414 — бюджетные инвестиции в объекты капитального строительства).
-KVR_GRK = re.compile(r"^(243|4\d\d)$")
+# 12.11: по указанию СРО к ГрК относятся только КВР 243 (капитальный ремонт) и 407, 413, 414
+# (капитальное строительство). Раньше подходил любой 4xx. Список меняется в config.toml: [grk] kvr_grk.
+KVR_GRK_DEFAULT = ("243", "407", "413", "414")
+KVR_GRK_SET: set[str] = set(KVR_GRK_DEFAULT)
+
+
+def set_kvr_grk(codes) -> None:
+    global KVR_GRK_SET
+    KVR_GRK_SET = {str(c).strip() for c in (codes or KVR_GRK_DEFAULT) if str(c).strip()}
 
 
 # Предмет договора: работы, которые ГрК не регулирует.
@@ -136,9 +144,10 @@ def classify(ikz: str = "", okpd_codes: list[str] | None = None,
     src = "ИКЗ" if ikz_okpd else "позиции договора"
     if not building:
         return NOT_GRK, f"ОКПД2 {', '.join(codes[:3])} ({src}) — не строительные работы"
-    if kvr and KVR_GRK.match(kvr):
-        what = "капремонт" if kvr == "243" else "капитальные вложения"
+    if kvr and kvr in KVR_GRK_SET:
+        what = "капитальный ремонт" if kvr == "243" else "капитальное строительство"
         return GRK, f"ОКПД2 {building[0]} ({src}), КВР {kvr} — {what}"
     if kvr:
-        return GRK_PROBABLE, f"ОКПД2 {building[0]} ({src}), КВР {kvr} — проверить: может быть текущий ремонт"
+        return GRK_PROBABLE, (f"ОКПД2 {building[0]} ({src}), КВР {kvr} — не из списка СРО "
+                              f"({', '.join(sorted(KVR_GRK_SET))}): проверить, может быть текущий ремонт")
     return GRK_PROBABLE, f"ОКПД2 {building[0]} ({src}), КВР нет (223-ФЗ) — строительные работы"

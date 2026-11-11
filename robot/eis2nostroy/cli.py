@@ -117,9 +117,15 @@ def _keep(cfg: Config, contracts: list) -> list:
     """Только договоры по Градостроительному кодексу (если [grk] only = true)."""
     if not _grk_only(cfg):
         return contracts
-    from .grk import NOT_GRK, UNKNOWN, current_repair_reason, resource_supply_reason
+    from .grk import NOT_GRK, UNKNOWN, classify, current_repair_reason, resource_supply_reason, set_kvr_grk
+    set_kvr_grk(cfg.raw.get("grk", {}).get("kvr_grk"))
     kept, repair, dropped = [], 0, []
     for c in contracts:
+        # 12.11: договоры 44-ФЗ с ИКЗ переклассифицируются по действующим правилам (список КВР СРО),
+        # в том числе сохранённые раньше — архивы старых дней удалены, пересборка невозможна
+        if c.law == "44" and c.extra.get("ikz") and c.extra.get("grk") != "ПП-615":
+            cls, note = classify(c.extra["ikz"], c.extra.get("okpd2") or [], subject=c.subject)
+            c.extra["grk"], c.extra["grk_note"] = cls, note
         if c.extra.get("grk") == NOT_GRK:
             dropped.append((c, "не работы по ГрК: " + (c.extra.get("grk_note") or "по коду ОКПД2 и предмету")))
             continue

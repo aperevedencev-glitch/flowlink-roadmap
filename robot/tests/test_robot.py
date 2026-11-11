@@ -817,3 +817,13 @@ class ExcludedSheetTests(unittest.TestCase):
             added, errors = cmd_targeted44(cfg, tmp / "list.xlsx", 10, Store(), lambda cfg, c: c, client=Client(), law="223")
             self.assertEqual(asked, [("RD223", "54716016979180027840000", "223")])
             self.assertTrue(list(tmp.glob("targeted223_по_номерам_*.xlsx")))
+
+
+class KvrListTests(unittest.TestCase):
+    """12.11: к ГрК относятся только КВР 243 (КР) и 407, 413, 414 (КС)."""
+
+    def test_sro_kvr_list(self):
+        from eis2nostroy.grk import GRK, GRK_PROBABLE, classify
+        base = "2" * 29 + "4120"
+        for kvr, want in (("243", GRK), ("407", GRK), ("413", GRK), ("414", GRK), ("412", GRK_PROBABLE), ("244", GRK_PROBABLE)):
+            self.assertEqual(classify(base + kvr)[0], want, kvr)
