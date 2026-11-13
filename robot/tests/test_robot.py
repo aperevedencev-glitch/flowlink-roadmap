@@ -850,5 +850,19 @@ class KvrListTests(unittest.TestCase):
     def test_sro_kvr_list(self):
         from eis2nostroy.grk import GRK, GRK_PROBABLE, classify
         base = "2" * 29 + "4120"
-        for kvr, want in (("243", GRK), ("407", GRK), ("413", GRK), ("414", GRK), ("412", GRK_PROBABLE), ("244", GRK_PROBABLE)):
+        for kvr, want in (("243", GRK), ("407", GRK), ("413", GRK), ("414", GRK), ("412", GRK_PROBABLE), ("000", GRK_PROBABLE), ("611", GRK_PROBABLE)):
             self.assertEqual(classify(base + kvr)[0], want, kvr)
+
+    def test_kvr_244_is_current_repair(self):
+        """13.11: позиция СРО — КВР 244 = текущий ремонт, даже если в предмете капремонт не назван."""
+        from eis2nostroy import grk
+        base = "2" * 29 + "4211"
+        cls, note = grk.classify(base + "244", subject="Ремонт автомобильной дороги")
+        self.assertEqual(cls, grk.NOT_GRK)
+        self.assertIn("КВР 244", note)
+        try:
+            grk.set_kvr_not_grk([])          # правило можно выключить в config.toml
+            self.assertEqual(grk.classify(base + "244")[0], grk.GRK_PROBABLE)
+        finally:
+            grk.set_kvr_not_grk(None)
+        self.assertEqual(grk.classify(base + "244")[0], grk.NOT_GRK)

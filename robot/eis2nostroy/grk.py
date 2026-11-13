@@ -39,11 +39,23 @@ EXCLUDED = ("41.1",)
 # (капитальное строительство). Раньше подходил любой 4xx. Список меняется в config.toml: [grk] kvr_grk.
 KVR_GRK_DEFAULT = ("243", "407", "413", "414")
 KVR_GRK_SET: set[str] = set(KVR_GRK_DEFAULT)
+# 13.11: позиция СРО — оплата по КВР 244 («прочая закупка») означает текущий ремонт:
+# работы капитального характера за счёт КВР 244 оплачивать нельзя, заказчик предмет
+# сделки не оспаривает. Такие договоры не регулируются ГрК и исключаются сразу,
+# даже если в документации есть проект или требование СРО. Список: [grk] kvr_not_grk.
+KVR_NOT_GRK_DEFAULT = ("244",)
+KVR_NOT_GRK_SET: set[str] = set(KVR_NOT_GRK_DEFAULT)
 
 
 def set_kvr_grk(codes) -> None:
     global KVR_GRK_SET
     KVR_GRK_SET = {str(c).strip() for c in (codes or KVR_GRK_DEFAULT) if str(c).strip()}
+
+
+def set_kvr_not_grk(codes) -> None:
+    """None — список по умолчанию (244); пустой список [] — правило выключено."""
+    global KVR_NOT_GRK_SET
+    KVR_NOT_GRK_SET = {str(c).strip() for c in (KVR_NOT_GRK_DEFAULT if codes is None else codes) if str(c).strip()}
 
 
 # Предмет договора: работы, которые ГрК не регулирует.
@@ -144,6 +156,9 @@ def classify(ikz: str = "", okpd_codes: list[str] | None = None,
     src = "ИКЗ" if ikz_okpd else "позиции договора"
     if not building:
         return NOT_GRK, f"ОКПД2 {', '.join(codes[:3])} ({src}) — не строительные работы"
+    if kvr and kvr in KVR_NOT_GRK_SET:
+        return NOT_GRK, (f"ОКПД2 {building[0]} ({src}), КВР {kvr} — оплата из текущих расходов: "
+                         f"по позиции СРО от 13.11.2026 это текущий ремонт, ГрК не регулируется")
     if kvr and kvr in KVR_GRK_SET:
         what = "капитальный ремонт" if kvr == "243" else "капитальное строительство"
         return GRK, f"ОКПД2 {building[0]} ({src}), КВР {kvr} — {what}"
