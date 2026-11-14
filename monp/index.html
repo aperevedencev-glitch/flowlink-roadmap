@@ -241,6 +241,7 @@ function decode(buf){try{return new TextDecoder("utf-8",{fatal:true}).decode(buf
 /* ===== распознавание ===== */
 const isOrg=s=>/(^|\s)(ооо|оао|зао|пао|ао|нао|ип|уфк|фонд|казначейство|мфц|фгуп|гуп|муп|министерство|администрация|управление|общество|компания|учреждение|банк|палата)(\s|$)/.test(nName(s))||/[«"]/.test(String(s||""));
 const isBank=s=>/(^|\s)(пао|ао)?\s*(сбербанк|банк|втб|альфа банк|газпромбанк|почта россии|ркц|qiwi|юmoney)(\s|$)/.test(nName(s))||/банк/.test(nName(s));
+function regCores(t){return [...String(t||"").matchAll(/(?<!\d)(\d{2,3})\s*\/\s*(\d{1,5})\s*-?\s*н(?![а-яё])/gi)].map(m=>(+m[1])+"/"+(+m[2]))}
 function distHit(n,text){if(!n||!n.district)return false;const t=nName(text);const ws=nName(n.district).split(" ").filter(w=>w.length>=5&&!/нотариальн|округ|город|московск|област|район/.test(w));return ws.some(w=>t.includes(w.slice(0,Math.max(5,w.length-3))))}
 function period(t,date){t=String(t||"").toLowerCase();const L=["январ","феврал","март","апрел","ма","июн","июл","август","сентябр","октябр","ноябр","декабр"];
   let m=t.match(/(?:^|[^\d])([1-4])\s*(?:-?й)?\s*(?:кв\.?|квартал\S*)\s*(20\d\d)?/);if(m){const y=m[2]||(parseDate(date)?.getFullYear()||"");return m[1]+" кв. "+y}
@@ -299,7 +300,7 @@ function classify(r){
       let best={s:0,ids:[]};for(const src of srcs){const p=person(src);if(!p)continue;for(const [inn,n] of Object.entries(N)){const s=nameScore(p,person(n.name));if(s>best.s)best={s,ids:[inn]};else if(s&&s===best.s&&!best.ids.includes(inn))best.ids.push(inn)}}
       if(best.s>=0.55&&best.ids.length>1){const byD=best.ids.filter(id=>distHit(N[id],text));if(byD.length===1){best.ids=byD;why.push("однофамильца отличил по нотариальному округу")}}
       if(best.s>=0.55){if(best.ids.length===1){notary=best.ids[0];conf=Math.min(best.s,0.8);why.push("найден только по ФИО — подтвердите")}else why.push("несколько нотариусов с такой фамилией")}}
-    if(!notary){const rg=Object.entries(N).find(([,n])=>n.reg&&String(n.reg).length>=3&&nName(text).replace(/\s/g,"").includes(nName(n.reg).replace(/\s/g,"")));if(rg){notary=rg[0];conf=0.9;why.push("регистрационный номер нотариуса в назначении")}}
+    if(!notary){const cores=regCores(text);if(cores.length){const rg=Object.entries(N).filter(([,n])=>n.reg&&regCores(n.reg).some(c=>cores.includes(c)));if(rg.length===1){notary=rg[0][0];conf=0.9;why.push("регистрационный номер нотариуса в назначении")}}}
     if(notary&&N[notary]&&N[notary].district&&/округ/i.test(text)&&!distHit(N[notary],text)&&!/ИНН нотариуса/.test(why.join())){why.push("в назначении другой нотариальный округ");conf=Math.min(conf,0.8)}
     const kw=kwHit(cfg.artIn,text);
     if(R&&R.article&&cfg.artIn.some(a=>a.name===R.article)){article=R.article;how="rule";byRule=true;if(!trusted){conf=Math.min(conf||0.8,0.8);if(!why.some(w=>/по правилу/.test(w)))why.push("статья по правилу, подтверждённому один раз — проверьте")}else if(!conf)conf=0.95}
