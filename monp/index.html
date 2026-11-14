@@ -18,6 +18,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#11161E;--surface:#18202B;--ink:#E4EAF2;--muted:#9AA6B6;--line:#2C3747;--soft:#1F2936;--accent:#8DB0E6;--accent-ink:#0E1520;--in:#5CC08F;--out:#EE8A6E;--warn:#E3B05A;--bad:#F07A88;color-scheme:dark}}
 :root[data-theme="dark"]{--paper:#11161E;--surface:#18202B;--ink:#E4EAF2;--muted:#9AA6B6;--line:#2C3747;--soft:#1F2936;--accent:#8DB0E6;--accent-ink:#0E1520;--in:#5CC08F;--out:#EE8A6E;--warn:#E3B05A;--bad:#F07A88;color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{background:var(--paper);color:var(--ink);font:14px/1.45 var(--f-ui);font-variant-numeric:tabular-nums}
 .wrap{max-width:1360px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 header{background:var(--surface);border-bottom:1px solid var(--line)}
@@ -84,7 +85,7 @@ details summary{cursor:pointer;font-weight:500}
 @media (max-width:560px){h1{font-size:19px}input.f{width:120px}select.f{width:170px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
-<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
 </head>
 <body>
 
@@ -150,7 +151,7 @@ const ART_OUT=[
 /* ===== state ===== */
 let db=null,user=null,downloads=null,uid="",canWrite=true;
 let cfg={org:"Московская областная нотариальная палата",inn:"",acc:"",artIn:JSON.parse(JSON.stringify(ART_IN)),artOut:JSON.parse(JSON.stringify(ART_OUT))};
-let notaries={},rules={},posted=new Set(),postings=[],refInfo=null;
+let notaries={},rules={},posted=new Set(),postings=[],refInfo=null,isChief=false,periods={},auditL=[],auditOn=false,names={};
 let view=lsGet("monp-view")||"bank";
 const BK={rows:[],meta:null,file:"",dir:"all",st:"all",sample:false};
 let sampleNotaries=null;
@@ -212,7 +213,20 @@ function period(t,date){t=String(t||"").toLowerCase();const L=["январ","ф�
 function person(s){const w=nName(s).replace(/(^|\s)(нотариус|нотариального|округа|ип)(?=\s|$)/g," ").split(" ").filter(x=>x&&!/^\d/.test(x));return w.length?{sur:w[0],i1:(w[1]||"")[0]||"",i2:(w[2]||"")[0]||""}:null}
 function nameScore(p,o){if(!p||!o||p.sur.length<3||p.sur!==o.sur)return 0;if(p.i1&&o.i1&&p.i1!==o.i1)return 0.4;if(p.i1&&p.i1===o.i1)return p.i2&&o.i2&&p.i2===o.i2?0.9:0.8;return 0.55}
 function kwHit(list,text){const t=nName(text);let best=null;for(const a of list){for(const k of String(a.kw||"").split(";").map(x=>nName(x)).filter(Boolean)){if(t.includes(k)&&(!best||k.length>best.k.length))best={a,k}}}return best}
-function ruleKeys(r){const k=[];if(/^\d{20}$/.test(r.cpAcc))k.push(r.dir+" acc "+r.cpAcc);if(/^\d{10,12}$/.test(r.cpInn))k.push(r.dir+" inn "+r.cpInn);const n=nName(r.cp);if(n.split(" ").length>=2)k.push(r.dir+" name "+n);return k.map(x=>"r_"+fnv(x))}
+function ruleKeysT(r){const k=[];if(/^\d{20}$/.test(r.cpAcc))k.push({t:"acc",k:r.dir+" acc "+r.cpAcc});if(/^\d{10,12}$/.test(r.cpInn))k.push({t:"inn",k:r.dir+" inn "+r.cpInn});const n=nName(r.cp);if(n.split(" ").length>=2)k.push({t:"name",k:r.dir+" name "+n});return k.map(x=>({t:x.t,k:"r_"+fnv(x.k)}))}
+function ruleKeys(r){return ruleKeysT(r).map(x=>x.k)}
+function feeList(n){if(Array.isArray(n.fees)&&n.fees.length)return n.fees.slice().sort((a,b)=>String(a.from).localeCompare(String(b.from)));return n.fee?[{from:"",fee:+n.fee}]:[]}
+function feeAt(n,m){let f=0;for(const x of feeList(n)){if(!x.from||x.from<=m)f=+x.fee}return f}
+function activeAt(n,m){const s=n.start?ym(n.start):"",e=n.end?ym(n.end):"";return (!s||s<=m)&&(!e||e>=m)}
+function feeTxt(n){return feeList(n).map(x=>(+x.fee).toLocaleString("ru-RU")+" ₽"+(x.from?" с "+x.from.slice(5)+"."+x.from.slice(0,4):"")).join("; ")}
+function parseFees(v){return String(v||"").split(/;|\n/).map(x=>x.trim()).filter(Boolean).map(x=>{const m=x.match(/с\s*(\d{1,2})[.\/](\d{4})/i);const f=num(x.replace(/с\s*\d{1,2}[.\/]\d{4}.*/i,"").replace(/[^\d.,]/g,""));return {fee:f,from:m?m[2]+"-"+m[1].padStart(2,"0"):""}}).filter(x=>x.fee>0)}
+function alloc(p){const s=String(p.period||"").trim();let m=s.match(/^(\d{2})\.(\d{4})$/);if(m)return [{ym:m[2]+"-"+m[1],sum:p.sum}];
+  m=s.match(/^([1-4]) кв\. ?(\d{4})$/);if(m){const q=+m[1];return [0,1,2].map(i=>({ym:m[2]+"-"+String((q-1)*3+i+1).padStart(2,"0"),sum:p.sum/3}))}
+  m=s.match(/^(\d{4}) год$/);if(m)return Array.from({length:12},(_,i)=>({ym:m[1]+"-"+String(i+1).padStart(2,"0"),sum:p.sum/12}));return [{ym:p.ym||ym(p.date),sum:p.sum}]}
+const isClosed=m=>!!(m&&periods&&periods[m]);
+const DEF_OP={"Оплата труда":"Перечисление заработной платы","Налоги и страховые взносы (ЕНП)":"Уплата налога","Подотчётные суммы":"Выдача подотчетному лицу","Командировки":"Выдача подотчетному лицу","Банковские комиссии":"Прочее списание","Материальная помощь":"Прочее списание","Отчисления в Федеральную нотариальную палату":"Прочее списание","Прочие расходы":"Прочее списание"};
+function opOf(dir,article){const a=(dir==="in"?cfg.artIn:cfg.artOut).find(x=>x.name===article)||{};return a.op||(dir==="in"?"Прочее поступление":(DEF_OP[article]||"Оплата поставщику"))}
+async function logA(action,detail){if(!db)return;try{await db.collection("audit").doc("a_"+Date.now()+"_"+Math.random().toString(36).slice(2,7)).set({at:new Date().toISOString(),by:uid||"",action,...detail})}catch(e){}}
 const rowKey=r=>"p_"+fnv([r.dir,String(r.date).replace(/\D/g,""),Number(r.sum).toFixed(2),String(r.doc||"").replace(/\s/g,""),r.cpAcc||nName(r.cp).slice(0,40)].join("|"));
 function classify(r){
   const text=r.cp+" "+r.purpose;const why=[];let conf=0,notary="",article="",how="";
@@ -223,7 +237,7 @@ function classify(r){
     if(!notary&&R&&R.notary&&N[R.notary]){notary=R.notary;conf=0.95;why.push("запомнено по прошлому разнесению")}
     if(!notary){const srcs=[r.cp,...(String(r.purpose).match(/нотариус\S*\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё.]*\s*[А-ЯЁ]?[а-яё.]*/g)||[])];
       let best={s:0,ids:[]};for(const src of srcs){const p=person(src);if(!p)continue;for(const [inn,n] of Object.entries(N)){const s=nameScore(p,person(n.name));if(s>best.s)best={s,ids:[inn]};else if(s&&s===best.s&&!best.ids.includes(inn))best.ids.push(inn)}}
-      if(best.s>=0.55){if(best.ids.length===1){notary=best.ids[0];conf=best.s;why.push("ФИО нотариуса")}else why.push("несколько нотариусов с такой фамилией")}}
+      if(best.s>=0.55){if(best.ids.length===1){notary=best.ids[0];conf=Math.min(best.s,0.8);why.push("найден только по ФИО — подтвердите")}else why.push("несколько нотариусов с такой фамилией")}}
     const kw=kwHit(cfg.artIn,text);
     if(R&&R.article&&cfg.artIn.some(a=>a.name===R.article)){article=R.article;how="rule"}
     else if(kw){article=kw.a.name;why.push("«"+kw.k+"» в назначении");conf=Math.max(conf,notary?conf:0.88)}
@@ -232,6 +246,9 @@ function classify(r){
     if(notary&&article!==cfg.artIn[0].name&&!kw&&!R)conf=Math.min(conf,0.7);
     if(!notary&&!kw&&!R)conf=0;
     if(!notary&&kw&&/взнос/i.test(article))conf=0.6,why.push("взнос, но нотариус не найден");
+    const nn=notary&&N[notary];const f=nn?feeAt(nn,ym(r.date)):0;
+    if(nn&&f>0&&article===cfg.artIn[0].name){const k=r.sum/f,kr=Math.round(k);if(kr>=1&&kr<=12&&Math.abs(k-kr)<0.0005)why.push("сумма = "+kr+" × взнос");else{why.push("сумма не кратна взносу "+rub(f));conf=Math.min(conf,0.8)}}
+    if(nn&&!activeAt(nn,ym(r.date))){why.push("дата платежа вне срока полномочий");conf=Math.min(conf,0.8)}
   }else{
     if(R&&R.article&&cfg.artOut.some(a=>a.name===R.article)){article=R.article;conf=0.95;why.push("запомнено: этот получатель раньше разнесён так")}
     else{const kw=kwHit(cfg.artOut,text);if(kw){article=kw.a.name;conf=0.88;why.push("«"+kw.k+"» в назначении")}else{article=cfg.artOut[cfg.artOut.length-1].name;conf=0;why.push("статья не определена")}}
@@ -240,8 +257,8 @@ function classify(r){
   const status=conf>=0.85?"auto":conf>=0.5?"check":"none";
   return {notary,article,acc,period:period(r.purpose,r.date),conf,why,status,sel:status==="auto"};
 }
-function load(rows,meta,file,sample){BK.rows=rows.map((r,i)=>{const x={...r,i,key:rowKey(r)};Object.assign(x,classify(x));if(posted.has(x.key)){x.status="done";x.sel=false}return x});BK.meta=meta;BK.file=file;BK.sample=!!sample;BK.st="all";view="bank";render()}
-function recheck(){BK.rows.forEach(x=>{if(x.status!=="done"&&posted.has(x.key)){x.status="done";x.sel=false}})}
+function load(rows,meta,file,sample){BK.conflicts=null;BK.ruleMode=null;BK.rows=rows.map((r,i)=>{const x={...r,i,key:rowKey(r)};Object.assign(x,classify(x));if(posted.has(x.key)){x.status="done";x.sel=false}else if(!sample&&isClosed(ym(x.date))){x.locked=true;x.sel=false}return x});BK.meta=meta;BK.file=file;BK.sample=!!sample;BK.st="all";view="bank";render()}
+function recheck(){BK.rows.forEach(x=>{if(x.status!=="done"&&posted.has(x.key)){x.status="done";x.sel=false}else if(x.status==="done"&&!posted.has(x.key)&&!BK.sample){Object.assign(x,classify(x),{manual:false})}x.locked=!BK.sample&&x.status!=="done"&&isClosed(ym(x.date));if(x.locked)x.sel=false})}
 async function readFile(f){if(!f)return;if(/\.xls$/i.test(f.name)){toast("Старый формат .xls: откройте в Excel и сохраните как .xlsx");return}
   try{const buf=await f.arrayBuffer();if(/\.xlsx$/i.test(f.name)){const P=parseTable(await xlsxRows(buf));if(P.err){toast(P.err);return}sampleNotaries=null;load(P.rows,P.meta,f.name);return}readText(decode(buf),f.name)}catch(e){toast("Не удалось прочитать файл: "+(e.message||e))}}
 function readText(t,name){sampleNotaries=null;if(/1CClientBankExchange/.test(t)){const P=parse1C(t);load(P.rows,P.meta,name);return}const P=parseTable(splitDelim(t));if(P.err){toast(P.err);return}load(P.rows,P.meta,name)}
@@ -355,8 +372,8 @@ function render(){document.querySelectorAll(".tab").forEach(b=>b.setAttribute("a
   if(view==="bank")renderBank();if(view==="journal")renderJournal();if(view==="refs")renderRefs()}
 function artOpts(dir,v){return (dir==="in"?cfg.artIn:cfg.artOut).map(a=>`<option ${a.name===v?"selected":""}>${esc(a.name)}</option>`).join("")}
 function notOpts(){return Object.entries(NOT()).sort((a,b)=>a[1].name.localeCompare(b[1].name,"ru")).map(([k,n])=>`<option value="${esc(n.name)}">${esc(n.district||"")}</option>`).join("")}
-const notByInn=inn=>{if(!inn)return "";const N=NOT();if(N[inn])return inn;return Object.keys(N).find(k=>N[k].inn===inn)||""};
-const STL={auto:"Авто",manual:"Вручную",check:"Проверить",none:"Не определено",done:"Уже разнесено"};
+const notByInn=inn=>{if(!inn)return "";const N=NOT();if(N[inn])return inn;const k=Object.keys(N).find(k=>N[k].inn===inn);if(k)return k;const R=rules["r_"+fnv("in inn "+inn)];return R&&R.notary&&N[R.notary]?R.notary:""};
+const STL={auto:"Авто",manual:"Вручную",check:"Проверить",none:"Не определено",done:"Уже разнесено",locked:"Месяц закрыт"};
 function renderBank(){
   const el=$("#v-bank");const R=BK.rows;
   const intro=`<div class="panel"><div class="intro"><img class="bot" src="robots/point_r.png" alt=""><div><h2>Выписка за период</h2><p class="note" style="max-width:78ch">Загрузите выписку по расчётному счёту палаты: файл обмена с 1С из банк-клиента (<b>kl_to_1c.txt</b>) или таблицу из интернет-банка (<b>Excel / CSV</b>). Робот разнесёт поступления по нотариусам и статьям доходов, а списания — по статьям расходов, и запомнит ваши исправления. Готовое разнесение выгружается в Excel для загрузки в 1С.</p></div></div>
@@ -374,10 +391,11 @@ function renderBank(){
   const segD=(k,l)=>`<button data-dir="${k}" aria-pressed="${BK.dir===k}">${l}</button>`;const segS=(k,l,n)=>`<button data-st="${k}" aria-pressed="${BK.st===k}">${l}${n!=null?" · "+n:""}</button>`;
   el.innerHTML=intro+`<div class="sum"><div class="kv in"><span class="lbl">Поступления</span><b>${rub(s(inR))}</b><span class="note">${inR.length} платежей</span></div><div class="kv out"><span class="lbl">Списания</span><b>${rub(s(outR))}</b><span class="note">${outR.length} платежей</span></div><div class="kv"><span class="lbl">Разнесено роботом</span><b>${cnt("auto")}</b><span class="note">из ${pend.length} новых</span></div><div class="kv"><span class="lbl">Ждут решения</span><b>${cnt("check")+cnt("none")}</b><span class="note">проверить или выбрать статью</span></div></div>
    ${allDone?`<div class="done-msg"><img src="robots/heart.png" alt=""><div><b>Выписка разнесена полностью.</b><div class="note">Выгрузите Excel для 1С — итоги уже в журнале.</div></div></div>`:""}
+   ${BK.conflicts?`<div class="panel" style="border-color:var(--warn)"><h3>Ваш выбор расходится с тем, что робот запомнил раньше</h3><div class="tbl" style="margin:8px 0"><table><thead><tr><th>Контрагент</th><th>Было запомнено</th><th>Вы выбрали</th></tr></thead><tbody>${BK.conflicts.map(({r,R})=>`<tr><td>${esc(String(r.cp||"").split("//")[0])}</td><td>${esc(R.article||"")}${R.notary?`<div class="note">${esc((NOT()[R.notary]||{}).name||"")}</div>`:""}</td><td>${esc(r.article)}${r.notary?`<div class="note">${esc((NOT()[r.notary]||{}).name||"")}</div>`:""}</td></tr>`).join("")}</tbody></table></div><div class="row"><button class="btn pri" data-rulemode="replace">Провести и заменить правила</button><button class="btn" data-rulemode="keep">Провести, правила оставить прежними</button><button class="btn" data-rulemode="cancel">Вернуться к таблице</button></div></div>`:""}
    <div class="panel"><div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="row"><div class="seg">${segD("all","Все")}${segD("in","Приход")}${segD("out","Расход")}</div><div class="seg">${segS("all","Все")}${segS("auto","Разнесено",cnt("auto"))}${segS("check","Проверить",cnt("check"))}${segS("none","Не определено",cnt("none"))}${R.some(r=>r.status==="done")?segS("done","Уже разнесено",R.filter(r=>r.status==="done").length):""}</div></div></div>
    <datalist id="notList">${notOpts()}</datalist>
    <div class="tbl"><table><thead><tr><th><input type="checkbox" id="selAll" aria-label="Отметить все видимые"></th><th>Дата, №</th><th>Контрагент</th><th class="num">Сумма</th><th>Назначение платежа</th><th>Статья · счёт</th><th>Нотариус</th><th>Период</th><th>Статус</th></tr></thead><tbody>
-   ${vis.map(r=>{const lock=r.status==="done";const n=NOT()[r.notary];return `<tr data-i="${r.i}" class="${lock?"done":""}">
+   ${vis.map(r=>{const lock=r.status==="done"||r.locked;const n=NOT()[r.notary];return `<tr data-i="${r.i}" class="${lock?"done":""}">
      <td><input type="checkbox" data-sel ${r.sel?"checked":""} ${lock?"disabled":""} aria-label="Провести"></td>
      <td style="white-space:nowrap"><span class="dir ${r.dir}"></span>${esc(r.date)}${r.doc?`<div class="note">№ ${esc(r.doc)}</div>`:""}</td>
      <td>${esc(String(r.cp||"").split("//")[0])||"—"}${r.cpInn?`<div class="note">ИНН ${esc(r.cpInn)}</div>`:""}</td>
@@ -386,7 +404,7 @@ function renderBank(){
      <td><select class="f" data-art ${lock?"disabled":""}>${artOpts(r.dir,r.article)}</select><div class="note">счёт ${esc(r.acc||"—")}</div></td>
      <td>${r.dir==="in"?`<input class="f" list="notList" data-not value="${esc(n?n.name:"")}" placeholder="ФИО или ИНН" ${lock?"disabled":""}>${n?`<div class="note">${esc(n.district||"")}${n.inn?" · ИНН "+esc(n.inn):""}</div>`:""}`:`<span class="note">—</span>`}</td>
      <td><input class="f" style="width:96px" data-per value="${esc(r.period)}" placeholder="ММ.ГГГГ" ${lock?"disabled":""}></td>
-     <td><span class="pill st-${r.status}">${STL[r.status]}</span>${r.conf&&r.status!=="done"&&r.status!=="manual"?` <span class="note">${Math.round(r.conf*100)}%</span>`:""}<div class="why">${esc(r.why.join("; "))}</div></td></tr>`}).join("")}
+     <td><span class="pill st-${r.locked?"none":r.status}">${r.locked?STL.locked:STL[r.status]}</span>${r.conf&&r.status!=="done"&&r.status!=="manual"?` <span class="note">${Math.round(r.conf*100)}%</span>`:""}<div class="why">${esc(r.why.join("; "))}</div></td></tr>`}).join("")}
    </tbody></table></div>
    <div class="row" style="margin-top:12px"><button class="btn pri" id="postBtn" ${sel.length&&db&&!BK.sample&&canWrite?"":"disabled"}>Провести отмеченные: ${sel.length} (приход ${rub(s(sel.filter(r=>r.dir==="in")))}, расход ${rub(s(sel.filter(r=>r.dir==="out")))})</button><button class="btn" id="xlsBtn">Excel для загрузки в 1С</button>${!db?`<span class="note">Хранилище недоступно в этом окне: провести нельзя, выгрузка работает.</span>`:""}</div></div>`;
   bindBank();
@@ -402,6 +420,7 @@ document.addEventListener("click",e=>{const t=e.target.closest("button");if(!t)r
   if(t.dataset.dir){BK.dir=t.dataset.dir;renderBank();return}
   if(t.dataset.st){BK.st=t.dataset.st;renderBank();return}
   if(t.id==="postBtn"){post(t);return}
+  if(t.dataset.rulemode){if(t.dataset.rulemode==="cancel"){BK.conflicts=null;BK.ruleMode=null;renderBank();return}BK.ruleMode=t.dataset.rulemode;post($("#postBtn"));return}
   if(t.id==="xlsBtn"){exportBank();return}
 });
 document.addEventListener("change",e=>{const t=e.target;
@@ -419,17 +438,23 @@ document.addEventListener("input",e=>{if(e.target.id!=="paste")return;const v=e.
 
 /* ===== проведение ===== */
 async function post(btn){
-  if(!db||BK.sample)return;const sel=BK.rows.filter(r=>r.sel&&r.status!=="done");if(!sel.length)return;
-  btn.disabled=true;btn.textContent="Провожу…";const batch="b"+Date.now();let n=0,learned=0;
+  if(!db||BK.sample)return;let sel=BK.rows.filter(r=>r.sel&&r.status!=="done");if(!sel.length)return;
+  const locked=sel.filter(r=>isClosed(ym(r.date)));if(locked.length){toast(`Пропущено ${locked.length}: месяц закрыт`);sel=sel.filter(r=>!locked.includes(r))}if(!sel.length){renderBank();return}
+  if(BK.ruleMode==null){const C=[];for(const r of sel){if(!r.manual)continue;for(const {k} of ruleKeysT(r)){const R=rules[k];if(R&&(R.article!==r.article||(r.dir==="in"&&(R.notary||"")!==(r.notary||"")))){C.push({r,R});break}}}
+    if(C.length){BK.conflicts=C;renderBank();window.scrollTo({top:0,behavior:"smooth"});return}}
+  const mode=BK.ruleMode||"replace";BK.ruleMode=null;BK.conflicts=null;
+  if(btn){btn.disabled=true;btn.textContent="Провожу…"}const batch="b"+Date.now();let n=0,learned=0,sum=0;
   for(const r of sel){
-    try{const ref=db.collection("postings").doc(r.key);const ex=await ref.get();if(ex.exists){r.status="done";r.sel=false;continue}
-      const N=NOT()[r.notary];
-      await ref.set({dir:r.dir,date:r.date,ym:ym(r.date),sum:r.sum,doc:r.doc||"",cp:String(r.cp||"").slice(0,160),cpInn:r.cpInn||"",cpAcc:r.cpAcc||"",purpose:String(r.purpose||"").slice(0,240),article:r.article,acc:r.acc||"",notary:r.notary||"",notaryName:N?N.name:"",period:r.period||"",how:r.status,batch,file:BK.file.slice(0,120),at:new Date().toISOString(),by:uid||""});
-      n++;r.status="done";r.sel=false;posted.add(r.key);
+    try{const ref=db.collection("postings").doc(r.key);const ex=await ref.get();const old=ex.exists?ex.data():null;if(old&&!old.cancelled){r.status="done";r.sel=false;continue}
+      const N=NOT()[r.notary];const prev=old?[...(old.prev||[]),{article:old.article||"",notary:old.notary||"",cancelReason:old.cancelReason||"",cancelledAt:old.cancelledAt||"",cancelledBy:old.cancelledBy||""}].slice(-10):[];
+      await ref.set({dir:r.dir,date:r.date,ym:ym(r.date),sum:r.sum,doc:r.doc||"",cp:String(r.cp||"").slice(0,160),cpInn:r.cpInn||"",cpAcc:r.cpAcc||"",purpose:String(r.purpose||"").slice(0,240),article:r.article,acc:r.acc||"",op:opOf(r.dir,r.article),notary:r.notary||"",notaryName:N?N.name:"",period:r.period||"",how:r.status,batch,file:BK.file.slice(0,120),at:new Date().toISOString(),by:uid||"",prev});
+      n++;sum=r2(sum+r.sum);r.status="done";r.sel=false;posted.add(r.key);
       if(r.manual||r.conf<0.95){const body={article:r.article,cp:String(r.cp||"").slice(0,120),at:new Date().toISOString(),by:uid||""};if(r.dir==="in"&&r.notary)body.notary=r.notary;
-        for(const k of ruleKeys(r)){if(r.dir==="in"&&!r.notary&&/name/.test(k))continue;try{await db.collection("rules").doc(k).set(body);rules[k]=body;learned++}catch(e){}}}
-      if(r.dir==="in"&&r.notary&&/^\d{12}$/.test(r.cpInn)&&!(notaries[r.notary]||{}).inn){const n0=notaries[r.notary]||{};try{await db.doc("notaries/"+r.notary).set({name:n0.name||"",district:n0.district||"",fee:n0.fee||0,inn:r.cpInn,at:new Date().toISOString(),by:uid||""})}catch(e){}}
+        const KT=ruleKeysT(r);const strong=KT.some(x=>x.t!=="name");
+        for(const {t,k} of KT){if(r.dir==="in"&&t==="name"&&strong)continue;if(r.dir==="in"&&!r.notary&&t==="name")continue;const R=rules[k];if(R&&mode==="keep"&&(R.article!==body.article||(R.notary||"")!==(body.notary||"")))continue;
+          try{await db.collection("rules").doc(k).set(body);rules[k]=body;learned++}catch(e){}}}
     }catch(e){toast("Не записано: "+(e?.code||e?.message||"ошибка"))}}
+  if(n)await logA("Проведение",{n,sum,file:BK.file.slice(0,120),batch});
   renderBank();toast(`Проведено: ${n}${learned?` · робот запомнил контрагентов: ${learned}`:""}`);
 }
 
@@ -449,75 +474,121 @@ async function xlsx(sheets){
 async function save(blob,name){if(!downloads){if(!window.claude){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);toast("Файл сохранён");return}toast("Скачивание недоступно в этом окне");return}try{await downloads.save({filename:name,data:blob});toast("Файл сохранён")}catch(e){if(e?.code!=="declined")toast("Файл не сохранён: "+(e?.code||e?.message||""))}}
 function sheetsFor(list,withStatus){
   const nm=r=>r.notaryName||(NOT()[r.notary]||{}).name||"";
-  const IN=[["Дата","Номер п/п","Плательщик","ИНН плательщика","Сумма, руб.","Статья","Счёт учёта (Кт)","Нотариус","ИНН нотариуса","Период","Назначение платежа"].concat(withStatus?["Статус"]:[])];
-  const OUT=[["Дата","Номер п/п","Получатель","ИНН получателя","Сумма, руб.","Статья","Счёт учёта (Дт)","Период","Назначение платежа"].concat(withStatus?["Статус"]:[])];
+  const IN=[["Дата","Номер п/п","Плательщик","ИНН плательщика","Сумма, руб.","Вид операции 1С","Статья","Счёт учёта (Кт)","Нотариус","ИНН нотариуса","Период","Назначение платежа"].concat(withStatus?["Статус"]:[])];
+  const OUT=[["Дата","Номер п/п","Получатель","ИНН получателя","Сумма, руб.","Вид операции 1С","Статья","Счёт учёта (Дт)","Период","Назначение платежа"].concat(withStatus?["Статус"]:[])];
   const T={};
   for(const r of list){const st=withStatus?[STL[r.status]||""]:[];
-    if(r.dir==="in")IN.push([r.date,r.doc||"",String(r.cp||"").split("//")[0],r.cpInn||"",r.sum,r.article,r.acc||"",nm(r),(NOT()[r.notary]||{}).inn||"",r.period||"",r.purpose||""].concat(st));
-    else OUT.push([r.date,r.doc||"",String(r.cp||"").split("//")[0],r.cpInn||"",r.sum,r.article,r.acc||"",r.period||"",r.purpose||""].concat(st));
+    if(r.dir==="in")IN.push([r.date,r.doc||"",String(r.cp||"").split("//")[0],r.cpInn||"",r.sum,opOf("in",r.article),r.article,r.acc||"",nm(r),(NOT()[r.notary]||{}).inn||(r.notary&&/^\d{12}$/.test(r.cpInn)?r.cpInn:""),r.period||"",r.purpose||""].concat(st));
+    else OUT.push([r.date,r.doc||"",String(r.cp||"").split("//")[0],r.cpInn||"",r.sum,opOf("out",r.article),r.article,r.acc||"",r.period||"",r.purpose||""].concat(st));
     const k=(r.dir==="in"?"Приход":"Расход")+"|"+r.article+"|"+(r.acc||"");T[k]=r2((T[k]||0)+r.sum)}
   const SV=[["Направление","Статья","Счёт учёта","Сумма, руб."]].concat(Object.entries(T).sort().map(([k,v])=>{const [d,a,c]=k.split("|");return [d,a,c,v]}));
-  return [{name:"Поступления",rows:IN,widths:[11,9,32,14,14,30,10,28,14,10,60,12]},{name:"Списания",rows:OUT,widths:[11,9,32,14,14,34,10,10,60,12]},{name:"Свод по статьям",rows:SV,widths:[12,40,12,16]}]}
+  return [{name:"Поступления",rows:IN,widths:[11,9,32,14,14,22,30,10,28,14,10,60,12]},{name:"Списания",rows:OUT,widths:[11,9,32,14,14,26,34,10,10,60,12]},{name:"Свод по статьям",rows:SV,widths:[12,40,12,16]}]}
 async function exportBank(){if(!window.JSZip){toast("Модуль Excel не загрузился — обновите страницу");return}const list=BK.rows.filter(r=>r.sel||r.status==="done"||r.status==="auto"||r.status==="manual");if(!list.length){toast("Нет разнесённых строк");return}
   await save(await xlsx(sheetsFor(list,true)),"Разнесение выписки для 1С "+D()+".xlsx")}
 
 /* ===== журнал ===== */
-let J={month:"",tab:"art",year:String(new Date().getFullYear())};
+let J={month:"",tab:"art",year:String(new Date().getFullYear()),showCancelled:false,undoId:"",recon:null,reconFile:""};
+const live=()=>postings.filter(p=>!p.cancelled);
+const who=id=>id===uid?"вы":(names[id]||"сотрудник");
+async function resolveNames(ids){ids=[...new Set(ids.filter(x=>x&&!(x in names)))];if(!ids.length||!user?.profiles)return;try{const ps=await user.profiles(ids);let ch=false;ids.forEach(i=>{const n=ps?.[i]?.name||"";names[i]=n||"сотрудник";ch=true});if(ch&&view==="journal")renderJournal()}catch(e){}}
+function parseRecon(T){
+  const low=r=>r.map(x=>String(x??"").toLowerCase());let hi=-1;
+  for(let i=0;i<Math.min(T.length,40);i++){const j=low(T[i]).join("|");if(/(приход|поступ|дебет)/.test(j)&&/(расход|списан|кредит)/.test(j)){hi=i;break}}
+  if(hi<0)return {err:"Нужна таблица со столбцами «Поступление/Приход/Дебет» и «Списание/Расход/Кредит» — например, оборотно-сальдовая ведомость по счёту 51 в разрезе статей движения денежных средств."};
+  const h=low(T[hi]);const di=h.map((x,i)=>/приход|поступ|дебет/.test(x)?i:-1).filter(i=>i>=0),ki=h.map((x,i)=>/расход|списан|кредит/.test(x)?i:-1).filter(i=>i>=0);
+  const pick=a=>a.length>=3?a[1]:a[0];const cIn=pick(di),cOut=pick(ki);const lim=Math.min(cIn,cOut);
+  const rows=[];for(const r of T.slice(hi+1)){let name="";for(let i=0;i<lim;i++){const v=String(r[i]??"").trim();if(v&&!/^[\d\s.,-]+$/.test(v)){name=v;break}}if(!name||/^итог/i.test(name))continue;const a=num(r[cIn]),b=num(r[cOut]);if(!a&&!b)continue;rows.push({name,in:r2(a),out:r2(b)})}
+  return {rows}}
+async function readRecon(f){if(!f)return;try{const buf=await f.arrayBuffer();const T=/\.xlsx$/i.test(f.name)?await xlsxRows(buf):splitDelim(decode(buf));const P=parseRecon(T);if(P.err){toast(P.err);return}J.recon=P.rows;J.reconFile=f.name;renderJournal()}catch(e){toast("Не удалось прочитать файл: "+(e.message||e))}}
 function renderJournal(){
   const el=$("#v-journal");
   if(!db){el.innerHTML=`<div class="panel empty"><img class="bot bot-lg" src="robots/question.png" alt=""><h2>Журнал недоступен</h2><p>Хранилище не отвечает в этом окне. Откройте приложение на claude.ai.</p></div>`;return}
-  if(!postings.length){el.innerHTML=`<div class="panel empty"><img class="bot bot-lg" src="robots/question.png" alt=""><h2>Пока ничего не проведено</h2><p>Загрузите выписку на вкладке «Выписка» и проведите разнесение — операции появятся здесь, с итогами по статьям и взносам нотариусов.</p></div>`;return}
-  const months=[...new Set(postings.map(p=>p.ym).filter(Boolean))].sort().reverse();if(!J.month||!months.includes(J.month))J.month=months[0];
+  if(!postings.length&&J.tab!=="audit"){el.innerHTML=`<div class="panel empty"><img class="bot bot-lg" src="robots/question.png" alt=""><h2>Пока ничего не проведено</h2><p>Загрузите выписку на вкладке «Выписка» и проведите разнесение — операции появятся здесь, с итогами по статьям и взносам нотариусов.</p></div>`;return}
+  const months=[...new Set(postings.map(p=>p.ym).filter(Boolean))].sort().reverse();if(!months.length)months.push(new Date().toISOString().slice(0,7));if(!J.month||!months.includes(J.month))J.month=months[0];
   const mname=m=>{const [y,mm]=m.split("-");return new Date(+y,+mm-1,1).toLocaleDateString("ru-RU",{month:"long",year:"numeric"})};
-  const P=postings.filter(p=>p.ym===J.month);const s=a=>r2(a.reduce((x,y)=>x+y.sum,0));
+  const L=live();const P=L.filter(p=>p.ym===J.month);const s=a=>r2(a.reduce((x,y)=>x+y.sum,0));const closed=isClosed(J.month);const cl=periods[J.month];
   const byArt=dir=>{const m={};P.filter(p=>p.dir===dir).forEach(p=>{const k=p.article;m[k]=m[k]||{sum:0,n:0,acc:p.acc};m[k].sum=r2(m[k].sum+p.sum);m[k].n++});return Object.entries(m).sort((a,b)=>b[1].sum-a[1].sum)};
   const artTbl=(dir,title)=>{const A=byArt(dir);const tot=s(P.filter(p=>p.dir===dir));return `<div class="panel"><h3>${title} · ${rub(tot)}</h3>${A.length?`<div class="tbl"><table><thead><tr><th>Статья</th><th>Счёт</th><th class="num">Операций</th><th class="num">Сумма</th><th class="num">Доля</th></tr></thead><tbody>${A.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(v.acc||"")}</td><td class="num">${v.n}</td><td class="num amt ${dir}">${rub(v.sum)}</td><td class="num">${tot?Math.round(v.sum/tot*100):0}%</td></tr>`).join("")}</tbody></table></div>`:`<p class="note">Нет операций.</p>`}</div>`};
-  // взносы нотариусов за год
-  const yrs=[...new Set(postings.map(p=>(p.ym||"").slice(0,4)).filter(Boolean))].sort().reverse();if(!yrs.includes(J.year))J.year=yrs[0]||J.year;
-  const now=new Date();const monthsDue=+J.year<now.getFullYear()?12:+J.year===now.getFullYear()?now.getMonth()+1:0;
-  const paid={};postings.filter(p=>p.dir==="in"&&p.notary&&(p.ym||"").startsWith(J.year)&&p.article===cfg.artIn[0].name).forEach(p=>paid[p.notary]=r2((paid[p.notary]||0)+p.sum));
-  const NL=Object.entries(notaries).map(([k,n])=>{const due=r2((Number(n.fee)||0)*monthsDue);return {k,n,paid:paid[k]||0,due,diff:r2((paid[k]||0)-due)}}).sort((a,b)=>a.diff-b.diff);
-  const unknown=Object.keys(paid).filter(k=>!notaries[k]);
-  el.innerHTML=`<div class="panel"><div class="row" style="justify-content:space-between"><div class="row"><label class="note" for="jm">Месяц</label><select class="f" id="jm">${months.map(m=>`<option value="${m}" ${m===J.month?"selected":""}>${mname(m)}</option>`).join("")}</select><div class="seg"><button data-jt="art" aria-pressed="${J.tab==="art"}">По статьям</button><button data-jt="ops" aria-pressed="${J.tab==="ops"}">Операции</button><button data-jt="not" aria-pressed="${J.tab==="not"}">Взносы нотариусов</button></div></div><button class="btn" id="jx">Excel за ${mname(J.month)}</button></div></div>
+  const seg=(k,l)=>`<button data-jt="${k}" aria-pressed="${J.tab===k}">${l}</button>`;
+  let body="";
+  if(J.tab==="art")body=`<div class="grid2">${artTbl("in","Поступления по статьям")}${artTbl("out","Расходы по статьям")}</div>`;
+  if(J.tab==="ops"){const O=postings.filter(p=>p.ym===J.month&&(J.showCancelled||!p.cancelled)).sort((a,b)=>(parseDate(b.date)||0)-(parseDate(a.date)||0));const nc=postings.filter(p=>p.ym===J.month&&p.cancelled).length;
+    body=`<div class="panel">${nc?`<label class="note" style="display:inline-flex;gap:6px;align-items:center;margin-bottom:8px"><input type="checkbox" id="showCanc" ${J.showCancelled?"checked":""}> Показать отменённые (${nc})</label>`:""}<div class="tbl"><table><thead><tr><th>Дата</th><th>Контрагент</th><th class="num">Сумма</th><th>Статья</th><th>Нотариус</th><th>Период</th><th>Проведено</th><th></th></tr></thead><tbody>${O.map(p=>`<tr class="${p.cancelled?"done":""}"><td style="white-space:nowrap"><span class="dir ${p.dir}"></span>${esc(p.date)}${p.doc?`<div class="note">№ ${esc(p.doc)}</div>`:""}</td><td>${esc(p.cp)}</td><td class="num amt ${p.dir}" ${p.cancelled?'style="text-decoration:line-through"':""}>${p.dir==="out"?"−":""}${rub(p.sum)}</td><td>${esc(p.article)}<div class="note">счёт ${esc(p.acc||"—")}</div></td><td>${esc(p.notaryName||"")}</td><td>${esc(p.period||"")}</td><td class="note">${esc(who(p.by))}, ${esc(new Date(p.at).toLocaleDateString("ru-RU"))}${p.prev&&p.prev.length?`<br>перепроведено`:""}</td>
+      <td>${p.cancelled?`<span class="pill st-none">Отменено</span><div class="why">${esc(p.cancelReason||"")} · ${esc(who(p.cancelledBy))}, ${esc(new Date(p.cancelledAt).toLocaleDateString("ru-RU"))}</div>`:closed?`<span class="note">месяц закрыт</span>`:J.undoId===p.id?`<div style="display:grid;gap:6px;min-width:200px"><input class="f" id="undoReason" style="width:100%" placeholder="Причина отмены (обязательно)"><div class="row"><button class="btn sm pri" data-undook>Отменить проведение</button><button class="btn sm" data-undocancel>Не отменять</button></div></div>`:`<button class="btn sm" data-undo="${esc(p.id)}" ${canWrite?"":"disabled"}>Отменить…</button>`}</td></tr>`).join("")}</tbody></table></div><p class="note" style="margin-top:8px">Отменённое проведение не удаляется: оно остаётся в журнале с причиной, а платёж можно разнести заново.</p></div>`;
+    resolveNames(O.flatMap(p=>[p.by,p.cancelledBy]))}
+  if(J.tab==="not"){
+    const ys=new Set();L.forEach(p=>alloc(p).forEach(a=>ys.add(a.ym.slice(0,4))));const yrs=[...ys].sort().reverse();if(!yrs.includes(J.year))J.year=yrs[0]||J.year;
+    const yr=J.year,now=new Date();const lastM=+yr<now.getFullYear()?12:+yr===now.getFullYear()?now.getMonth()+1:0;
+    const paid={};L.filter(p=>p.dir==="in"&&p.notary&&p.article===cfg.artIn[0].name).forEach(p=>alloc(p).forEach(a=>{if(a.ym.startsWith(yr+"-"))paid[p.notary]=(paid[p.notary]||0)+a.sum}));
+    const NL=Object.entries(notaries).map(([k,n])=>{let due=0;for(let m=1;m<=lastM;m++){const key=yr+"-"+String(m).padStart(2,"0");if(activeAt(n,key))due+=feeAt(n,key)}due=r2(due);const pd=r2(paid[k]||0);return {k,n,paid:pd,due,diff:r2(pd-due)}}).filter(x=>x.due||x.paid).sort((a,b)=>a.diff-b.diff);
+    const noFee=Object.values(notaries).filter(n=>!feeList(n).length).length;const unknown=Object.keys(paid).filter(k=>!notaries[k]);
+    body=`<div class="panel"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">Членские взносы за ${esc(yr)} год</h3><select class="f" id="jy" style="width:110px">${(yrs.length?yrs:[yr]).map(y=>`<option ${y===yr?"selected":""}>${y}</option>`).join("")}</select></div>
+      <p class="note" style="margin-bottom:8px">Оплата засчитывается за период из назначения платежа: квартальный взнос делится на три месяца, годовой — на двенадцать. Начислено — взнос из справочника за каждый месяц полномочий${lastM<12?` по ${new Date(+yr,lastM-1,1).toLocaleDateString("ru-RU",{month:"long"})} включительно`:""}, с учётом изменений размера взноса.${noFee?` У ${noFee} нотариусов взнос в справочнике не указан — им начисление не считается.`:""}</p>
+      ${NL.length?`<div class="tbl"><table><thead><tr><th>Нотариус</th><th>Округ</th><th>Взнос</th><th class="num">Начислено</th><th class="num">Оплачено</th><th class="num">Долг (−) / аванс (+)</th></tr></thead><tbody>${NL.map(x=>`<tr><td>${esc(x.n.name)}${x.n.inn?`<div class="note">ИНН ${esc(x.n.inn)}</div>`:""}</td><td>${esc(x.n.district||"")}</td><td class="note">${esc(feeTxt(x.n)||"—")}</td><td class="num">${rub(x.due)}</td><td class="num amt in">${rub(x.paid)}</td><td class="num" style="color:${x.diff<0?"var(--bad)":"var(--in)"}">${rub(x.diff)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="note">За ${esc(yr)} год нет ни начислений, ни оплат.</p>`}
+      ${unknown.length?`<p class="note" style="margin-top:8px">Есть оплаты нотариусов, которых нет в справочнике: ${unknown.length}.</p>`:""}</div>`}
+  if(J.tab==="recon"){
+    let tbl="";if(J.recon){const app={};P.forEach(p=>{const k=p.article;app[k]=app[k]||{in:0,out:0};app[k][p.dir]=r2(app[k][p.dir]+p.sum)});const used=new Set();
+      const rows=Object.entries(app).map(([a,v])=>{const na=nName(a);const i=J.recon.findIndex((x,ix)=>!used.has(ix)&&(nName(x.name)===na||nName(x.name).includes(na)||na.includes(nName(x.name))));if(i>=0)used.add(i);return {a,v,c:i>=0?J.recon[i]:null}});
+      const extra=J.recon.filter((x,i)=>!used.has(i));const T1={in:s(P.filter(p=>p.dir==="in")),out:s(P.filter(p=>p.dir==="out"))},T2={in:r2(J.recon.reduce((a,x)=>a+x.in,0)),out:r2(J.recon.reduce((a,x)=>a+x.out,0))};
+      const d=(a,b)=>{const x=r2(a-b);return `<td class="num" style="color:${Math.abs(x)>0.004?"var(--bad)":"var(--in)"}">${Math.abs(x)>0.004?rub(x):"✓"}</td>`};
+      const bad=rows.filter(x=>!x.c||Math.abs(x.v.in-x.c.in)>0.004||Math.abs(x.v.out-x.c.out)>0.004).length+extra.length;
+      tbl=`<p class="note" style="margin:8px 0">${esc(J.reconFile)} · сравнение с журналом за ${mname(J.month)}. ${bad?`<b style="color:var(--bad)">Расхождений: ${bad}</b>`:`<b style="color:var(--in)">Расхождений нет</b>`}</p>
+      <div class="tbl"><table><thead><tr><th>Статья</th><th class="num">Приход: приложение</th><th class="num">Приход: 1С</th><th class="num">Разница</th><th class="num">Расход: приложение</th><th class="num">Расход: 1С</th><th class="num">Разница</th></tr></thead><tbody>
+      ${rows.map(x=>`<tr><td>${esc(x.a)}${x.c?(nName(x.c.name)!==nName(x.a)?`<div class="note">в 1С: ${esc(x.c.name)}</div>`:""):`<div class="why" style="color:var(--bad)">нет в файле 1С</div>`}</td><td class="num">${rub(x.v.in)}</td><td class="num">${x.c?rub(x.c.in):"—"}</td>${d(x.v.in,x.c?x.c.in:0)}<td class="num">${rub(x.v.out)}</td><td class="num">${x.c?rub(x.c.out):"—"}</td>${d(x.v.out,x.c?x.c.out:0)}</tr>`).join("")}
+      ${extra.map(x=>`<tr><td>${esc(x.name)}<div class="why" style="color:var(--bad)">есть в 1С, нет в журнале</div></td><td class="num">—</td><td class="num">${rub(x.in)}</td>${d(0,x.in)}<td class="num">—</td><td class="num">${rub(x.out)}</td>${d(0,x.out)}</tr>`).join("")}
+      <tr><td><b>Итого</b></td><td class="num"><b>${rub(T1.in)}</b></td><td class="num"><b>${rub(T2.in)}</b></td>${d(T1.in,T2.in)}<td class="num"><b>${rub(T1.out)}</b></td><td class="num"><b>${rub(T2.out)}</b></td>${d(T1.out,T2.out)}</tr></tbody></table></div>`}
+    body=`<div class="panel"><h3>Сверка с 1С за ${mname(J.month)}</h3><p class="note" style="max-width:80ch">Сформируйте в 1С оборотно-сальдовую ведомость по счёту 51 за этот месяц в разрезе статей движения денежных средств (или отчёт по движению денежных средств по статьям) и сохраните в Excel. Робот сопоставит статьи по названию и покажет, где суммы в 1С расходятся с проведённым здесь.</p><div class="row" style="margin-top:10px"><label class="btn pri" for="reconFile" style="cursor:pointer">Выбрать файл из 1С</label><input type="file" id="reconFile" accept=".xlsx,.csv,.txt" hidden>${J.recon?`<button class="btn" id="reconClear">Очистить</button>`:""}</div>${tbl}</div>`}
+  if(J.tab==="audit"){
+    if(!auditOn){auditOn=true;db.collection("audit").onSnapshot(sn=>{auditL=sn.docs.map(d=>d.data()).sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,300);if(view==="journal"&&J.tab==="audit")renderJournal()},()=>{})}
+    body=`<div class="panel"><h3>Журнал действий</h3><p class="note" style="margin-bottom:8px">Последние 300 действий: проведения, отмены, закрытие месяцев, изменения справочников.</p>${auditL.length?`<div class="tbl"><table><thead><tr><th>Когда</th><th>Кто</th><th>Действие</th><th>Подробности</th></tr></thead><tbody>${auditL.map(a=>`<tr><td style="white-space:nowrap">${esc(new Date(a.at).toLocaleString("ru-RU",{dateStyle:"short",timeStyle:"short"}))}</td><td>${esc(who(a.by))}</td><td>${esc(a.action)}</td><td class="note">${esc([a.n?a.n+" опер.":"",a.sum?rub(a.sum):"",a.cp||"",a.month?a.month:"",a.reason?"причина: "+a.reason:"",a.file||"",a.count?a.count+" зап.":""].filter(Boolean).join(" · "))}</td></tr>`).join("")}</tbody></table></div>`:`<p class="note">Пока пусто.</p>`}</div>`;
+    resolveNames(auditL.map(a=>a.by))}
+  el.innerHTML=`<div class="panel"><div class="row" style="justify-content:space-between"><div class="row"><label class="note" for="jm">Месяц</label><select class="f" id="jm">${months.map(m=>`<option value="${m}" ${m===J.month?"selected":""}>${mname(m)}${isClosed(m)?" · закрыт":""}</option>`).join("")}</select><div class="seg">${seg("art","По статьям")}${seg("ops","Операции")}${seg("not","Взносы нотариусов")}${seg("recon","Сверка с 1С")}${seg("audit","Журнал действий")}</div></div>
+    <div class="row">${closed?`<span class="pill st-done">Месяц закрыт${cl&&cl.at?" "+esc(new Date(cl.at).toLocaleDateString("ru-RU")):""}</span>`:""}${isChief?`<button class="btn" id="jclose">${closed?"Открыть месяц":"Закрыть месяц"}</button>`:""}<button class="btn" id="jx">Excel за ${mname(J.month)}</button></div></div></div>
    <div class="sum"><div class="kv in"><span class="lbl">Приход за месяц</span><b>${rub(s(P.filter(p=>p.dir==="in")))}</b></div><div class="kv out"><span class="lbl">Расход за месяц</span><b>${rub(s(P.filter(p=>p.dir==="out")))}</b></div><div class="kv"><span class="lbl">Сальдо движения</span><b>${rub(s(P.filter(p=>p.dir==="in"))-s(P.filter(p=>p.dir==="out")))}</b></div><div class="kv"><span class="lbl">Операций</span><b>${P.length}</b></div></div>
-   ${J.tab==="art"?`<div class="grid2">${artTbl("in","Поступления по статьям")}${artTbl("out","Расходы по статьям")}</div>`:""}
-   ${J.tab==="ops"?`<div class="panel"><div class="tbl"><table><thead><tr><th>Дата</th><th>Контрагент</th><th class="num">Сумма</th><th>Статья</th><th>Нотариус</th><th>Период</th><th></th></tr></thead><tbody>${P.slice().sort((a,b)=>String(parseDate(b.date)?.getTime()).localeCompare(String(parseDate(a.date)?.getTime()))).map(p=>`<tr><td><span class="dir ${p.dir}"></span>${esc(p.date)}${p.doc?`<div class="note">№ ${esc(p.doc)}</div>`:""}</td><td>${esc(p.cp)}</td><td class="num amt ${p.dir}">${p.dir==="out"?"−":""}${rub(p.sum)}</td><td>${esc(p.article)}<div class="note">счёт ${esc(p.acc||"—")}</div></td><td>${esc(p.notaryName||"")}</td><td>${esc(p.period||"")}</td><td><button class="btn sm" data-undo="${esc(p.id)}" ${canWrite?"":"disabled"}>Отменить</button></td></tr>`).join("")}</tbody></table></div></div>`:""}
-   ${J.tab==="not"?`<div class="panel"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">Членские взносы за ${esc(J.year)} год</h3><select class="f" id="jy" style="width:110px">${(yrs.length?yrs:[J.year]).map(y=>`<option ${y===J.year?"selected":""}>${y}</option>`).join("")}</select></div><p class="note" style="margin-bottom:8px">Начислено = ежемесячный взнос из справочника × ${monthsDue} мес. Учитываются платежи по статье «${esc(cfg.artIn[0].name)}».</p>${NL.length?`<div class="tbl"><table><thead><tr><th>Нотариус</th><th>Округ</th><th class="num">Взнос в месяц</th><th class="num">Начислено</th><th class="num">Оплачено</th><th class="num">Долг (−) / аванс (+)</th></tr></thead><tbody>${NL.map(x=>`<tr><td>${esc(x.n.name)}${x.n.inn?`<div class="note">ИНН ${esc(x.n.inn)}</div>`:""}</td><td>${esc(x.n.district||"")}</td><td class="num">${x.n.fee?rub(x.n.fee):"—"}</td><td class="num">${rub(x.due)}</td><td class="num amt in">${rub(x.paid)}</td><td class="num" style="color:${x.diff<0?"var(--bad)":"var(--in)"}">${rub(x.diff)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="note">Справочник нотариусов пуст.</p>`}${unknown.length?`<p class="note" style="margin-top:8px">Платежи нотариусов, которых нет в справочнике: ${unknown.map(esc).join(", ")}.</p>`:""}</div>`:""}`;
+   ${body}`;
 }
-document.addEventListener("change",e=>{if(e.target.id==="jm"){J.month=e.target.value;renderJournal()}if(e.target.id==="jy"){J.year=e.target.value;renderJournal()}});
+document.addEventListener("change",e=>{if(e.target.id==="jm"){J.month=e.target.value;J.recon=null;J.undoId="";renderJournal()}if(e.target.id==="jy"){J.year=e.target.value;renderJournal()}if(e.target.id==="showCanc"){J.showCancelled=e.target.checked;renderJournal()}if(e.target.id==="reconFile"){readRecon(e.target.files[0]);e.target.value=""}});
 document.addEventListener("click",async e=>{const t=e.target.closest("button");if(!t)return;
-  if(t.dataset.jt){J.tab=t.dataset.jt;renderJournal();return}
-  if(t.id==="jx"){if(!window.JSZip){toast("Модуль Excel не загрузился");return}const P=postings.filter(p=>p.ym===J.month);await save(await xlsx(sheetsFor(P,false)),"Журнал разнесения "+J.month+".xlsx");return}
-  if(t.dataset.undo){if(t.dataset.armed!=="1"){t.dataset.armed="1";t.textContent="Точно отменить?";setTimeout(()=>{if(t.isConnected){t.dataset.armed="";t.textContent="Отменить"}},4000);return}
-    try{await db.collection("postings").doc(t.dataset.undo).delete();toast("Проведение отменено")}catch(err){toast("Не удалось: "+(err?.code||""))}}
+  if(t.dataset.jt){J.tab=t.dataset.jt;J.undoId="";renderJournal();return}
+  if(t.id==="reconClear"){J.recon=null;renderJournal();return}
+  if(t.id==="jx"){if(!window.JSZip){toast("Модуль Excel не загрузился");return}const P=live().filter(p=>p.ym===J.month);await save(await xlsx(sheetsFor(P,false)),"Журнал разнесения "+J.month+".xlsx");return}
+  if(t.id==="jclose"){if(!isChief)return;const m=J.month,was=isClosed(m);const next={...periods};if(was)delete next[m];else next[m]={by:uid||"",at:new Date().toISOString()};
+    try{await db.doc("config/periods").set({closed:next});await logA(was?"Месяц открыт":"Месяц закрыт",{month:m});toast(was?"Месяц открыт для изменений":"Месяц закрыт: проведения и отмены за него недоступны")}catch(err){toast("Не удалось: "+(err?.code||""))}return}
+  if(t.dataset.undo){J.undoId=t.dataset.undo;renderJournal();setTimeout(()=>$("#undoReason")?.focus(),0);return}
+  if(t.dataset.undocancel!==undefined){J.undoId="";renderJournal();return}
+  if(t.dataset.undook!==undefined){const reason=($("#undoReason")?.value||"").trim();if(reason.length<3){toast("Укажите причину отмены");return}const p=postings.find(x=>x.id===J.undoId);if(!p)return;if(isClosed(p.ym)){toast("Месяц закрыт — отмена невозможна");return}
+    t.disabled=true;try{await db.collection("postings").doc(p.id).update({cancelled:true,cancelReason:reason.slice(0,200),cancelledAt:new Date().toISOString(),cancelledBy:uid||""});await logA("Отмена проведения",{sum:p.sum,cp:String(p.cp||"").slice(0,80),reason:reason.slice(0,200)});J.undoId="";toast("Проведение отменено, запись осталась в журнале")}catch(err){t.disabled=false;toast("Не удалось: "+(err?.code||""))}return}
 });
 
 /* ===== справочники ===== */
 function renderRefs(){
   const el=$("#v-refs");const N=Object.entries(notaries).sort((a,b)=>a[1].name.localeCompare(b[1].name,"ru"));
-  const artTable=(dir,list)=>`<div class="panel"><h3>${dir==="in"?"Статьи поступлений":"Статьи расходов"}</h3><p class="note" style="margin-bottom:8px">Ключевые слова — через точку с запятой; робот ищет их в назначении платежа и названии контрагента. Последняя статья — «по умолчанию».</p><div class="tbl"><table><thead><tr><th>Статья</th><th>Счёт</th><th>Ключевые слова</th></tr></thead><tbody>${list.map((a,i)=>`<tr><td><input class="f" style="width:240px" data-ad="${dir}" data-ai="${i}" data-af="name" value="${esc(a.name)}"></td><td><input class="f" style="width:70px" data-ad="${dir}" data-ai="${i}" data-af="acc" value="${esc(a.acc)}"></td><td><input class="f" style="width:min(420px,60vw)" data-ad="${dir}" data-ai="${i}" data-af="kw" value="${esc(a.kw)}"></td></tr>`).join("")}</tbody></table></div><div class="row" style="margin-top:8px"><button class="btn sm" data-addart="${dir}">Добавить статью</button></div></div>`;
-  el.innerHTML=`<div class="panel"><h2>Палата</h2><div class="row"><label class="note" for="cOrg">Название</label><input class="f" id="cOrg" style="width:min(380px,80vw)" value="${esc(cfg.org)}"><label class="note" for="cInn">ИНН</label><input class="f" id="cInn" style="width:130px" value="${esc(cfg.inn)}"><label class="note" for="cAcc">Расчётный счёт</label><input class="f" id="cAcc" style="width:210px" value="${esc(cfg.acc)}"></div><p class="note" style="margin-top:6px">ИНН и счёт нужны, чтобы отличать поступления от списаний в таблицах интернет-банка; в файле 1С счёт берётся из самого файла.</p></div>
-   <div class="panel"><h2>Нотариусы · ${N.length}</h2>${refInfo?`<p class="note" style="margin-bottom:8px">Базовый список: ${(refInfo.list||[]).length} нотариусов со страницы <a href="${esc(refInfo.source)}" target="_blank" rel="noopener">«Список нотариусов» monp.ru</a> на ${esc(new Date(refInfo.asOf).toLocaleDateString("ru-RU"))}. Город указан по адресу конторы. ИНН и размера взноса в нём нет: робот узнаёт нотариуса по ФИО и запоминает ИНН после первого ручного разнесения.</p>`:""}<p class="note" style="margin-bottom:8px">Чтобы добавить ИНН и взносы, скопируйте из Excel таблицу со столбцами <b>ФИО</b>, <b>ИНН</b>, <b>Нотариальный округ</b>, <b>Взнос в месяц</b> (заголовок обязателен; нужен хотя бы столбец «ФИО») и вставьте сюда. Записи с тем же ФИО обновятся.</p>
-    <textarea class="f" id="notPaste" placeholder="ФИО	ИНН	Нотариальный округ	Взнос в месяц"></textarea><div class="row" style="margin-top:8px"><button class="btn pri" id="notSave" ${db&&canWrite?"":"disabled"}>Сохранить нотариусов</button><span class="note" id="notInfo"></span></div>
-    ${N.length?`<details style="margin-top:12px"><summary>Справочник (${N.length})</summary><div class="tbl" style="margin-top:8px"><table><thead><tr><th>ФИО</th><th>ИНН</th><th>Округ</th><th class="num">Взнос в месяц</th></tr></thead><tbody>${N.map(([k,n])=>`<tr><td>${esc(n.name)}</td><td>${esc(n.inn||"—")}</td><td>${esc(n.district||"")}</td><td class="num">${n.fee?rub(n.fee):"—"}</td></tr>`).join("")}</tbody></table></div></details>`:""}</div>
+  const ro=isChief?"":"disabled";
+  const artTable=(dir,list)=>`<div class="panel"><h3>${dir==="in"?"Статьи поступлений":"Статьи расходов"}</h3><p class="note" style="margin-bottom:8px">Ключевые слова — через точку с запятой; робот ищет их в назначении платежа и названии контрагента. Последняя статья — «по умолчанию». «Вид операции 1С» попадает в файл выгрузки.</p><div class="tbl"><table><thead><tr><th>Статья</th><th>Счёт</th><th>Вид операции 1С</th><th>Ключевые слова</th></tr></thead><tbody>${list.map((a,i)=>`<tr><td><input class="f" style="width:240px" data-ad="${dir}" data-ai="${i}" data-af="name" value="${esc(a.name)}" ${ro}></td><td><input class="f" style="width:70px" data-ad="${dir}" data-ai="${i}" data-af="acc" value="${esc(a.acc)}" ${ro}></td><td><input class="f" style="width:200px" data-ad="${dir}" data-ai="${i}" data-af="op" value="${esc(a.op||opOf(dir,a.name))}" ${ro}></td><td><input class="f" style="width:min(380px,55vw)" data-ad="${dir}" data-ai="${i}" data-af="kw" value="${esc(a.kw)}" ${ro}></td></tr>`).join("")}</tbody></table></div>${isChief?`<div class="row" style="margin-top:8px"><button class="btn sm" data-addart="${dir}">Добавить статью</button></div>`:""}</div>`;
+  el.innerHTML=`<div class="panel"><p class="note">${db?(isChief?"Ваша роль: <b>главный бухгалтер</b> (редактор приложения) — меняет справочники, статьи и закрывает месяцы.":"Ваша роль: <b>бухгалтер</b> — разносит и проводит выписку, отменяет проведения с указанием причины. Справочники и закрытие месяцев — у главного бухгалтера (редактора приложения)."):"Хранилище недоступно: справочники не сохраняются."}</p></div><div class="panel"><h2>Палата</h2><div class="row"><label class="note" for="cOrg">Название</label><input class="f" id="cOrg" style="width:min(380px,80vw)" value="${esc(cfg.org)}" ${ro}><label class="note" for="cInn">ИНН</label><input class="f" id="cInn" style="width:130px" value="${esc(cfg.inn)}" ${ro}><label class="note" for="cAcc">Расчётный счёт</label><input class="f" id="cAcc" style="width:210px" value="${esc(cfg.acc)}" ${ro}></div><p class="note" style="margin-top:6px">ИНН и счёт нужны, чтобы отличать поступления от списаний в таблицах интернет-банка; в файле 1С счёт берётся из самого файла.</p></div>
+   <div class="panel"><h2>Нотариусы · ${N.length}</h2>${refInfo?`<p class="note" style="margin-bottom:8px">Базовый список: ${(refInfo.list||[]).length} нотариусов со страницы <a href="${esc(refInfo.source)}" target="_blank" rel="noopener">«Список нотариусов» monp.ru</a> на ${esc(new Date(refInfo.asOf).toLocaleDateString("ru-RU"))}. Город указан по адресу конторы. ИНН и размера взноса в нём нет: робот узнаёт нотариуса по ФИО и запоминает ИНН после первого ручного разнесения.</p>`:""}<p class="note" style="margin-bottom:8px">Надёжнее всего выгрузить нотариусов из справочника контрагентов 1С — там уже есть ИНН. Скопируйте из Excel таблицу со столбцами <b>ФИО</b>, <b>ИНН</b>, <b>Нотариальный округ</b>, <b>Взнос в месяц</b>, <b>Начало полномочий</b>, <b>Окончание полномочий</b> (заголовок обязателен; нужен хотя бы «ФИО») и вставьте сюда. Изменение взноса пишите в одной ячейке: «18000; 20000 с 07.2026». Записи с тем же ФИО обновятся.</p>
+    <textarea class="f" id="notPaste" placeholder="ФИО	ИНН	Нотариальный округ	Взнос в месяц	Начало полномочий	Окончание полномочий" ${ro}></textarea><div class="row" style="margin-top:8px"><button class="btn pri" id="notSave" ${db&&isChief?"":"disabled"}>Сохранить нотариусов</button><span class="note" id="notInfo"></span></div>
+    ${N.length?`<details style="margin-top:12px"><summary>Справочник (${N.length})</summary><div class="tbl" style="margin-top:8px"><table><thead><tr><th>ФИО</th><th>ИНН</th><th>Округ</th><th>Взнос в месяц</th><th>Полномочия</th></tr></thead><tbody>${N.map(([k,n])=>`<tr><td>${esc(n.name)}</td><td>${esc(n.inn||"—")}</td><td>${esc(n.district||"")}</td><td class="note">${esc(feeTxt(n)||"—")}</td><td class="note">${esc([n.start?"с "+n.start:"",n.end?"по "+n.end:""].filter(Boolean).join(" ")||"—")}</td></tr>`).join("")}</tbody></table></div></details>`:""}</div>
    <div class="grid2">${artTable("in",cfg.artIn)}${artTable("out",cfg.artOut)}</div>
-   <div class="panel"><div class="row"><button class="btn pri" id="cfgSave" ${db&&canWrite?"":"disabled"}>Сохранить настройки и статьи</button><button class="btn" id="cfgReset">Вернуть статьи по умолчанию</button><span class="note">Запомнено контрагентов: ${Object.keys(rules).length}</span></div></div>
-   <div class="panel"><h2>Как загрузить результат в 1С</h2><ol class="note" style="margin:0;padding-left:18px;display:grid;gap:4px"><li>Загрузите ту же выписку в 1С как обычно: «Банк и касса» → «Банковские выписки» → «Загрузить» (kl_to_1c.txt).</li><li>Откройте файл «Разнесение выписки для 1С»: в нём для каждого платежа указаны статья, счёт учёта, нотариус и период.</li><li>Заполните по нему статьи движения денежных средств и счета в документах поступления и списания или загрузите листы через «Загрузку данных из табличного документа».</li><li>Лист «Свод по статьям» сверяйте с оборотами за период.</li></ol></div>`;
+   <div class="panel"><div class="row"><button class="btn pri" id="cfgSave" ${db&&isChief?"":"disabled"}>Сохранить настройки и статьи</button><button class="btn" id="cfgReset" ${isChief?"":"disabled"}>Вернуть статьи по умолчанию</button><span class="note">Запомнено контрагентов: ${Object.keys(rules).length}</span></div></div>
+   <div class="panel"><h2>Как загрузить результат в 1С</h2><ol class="note" style="margin:0;padding-left:18px;display:grid;gap:4px"><li>Загрузите ту же выписку в 1С как обычно: «Банк и касса» → «Банковские выписки» → «Загрузить» (kl_to_1c.txt).</li><li>Откройте файл «Разнесение выписки для 1С»: в нём для каждого платежа указаны статья, счёт учёта, нотариус и период.</li><li>Заполните по нему вид операции, статьи движения денежных средств и счета в документах поступления и списания или загрузите листы через «Загрузку данных из табличного документа».</li><li>В конце месяца выгрузите из 1С оборотно-сальдовую ведомость по счёту 51 по статьям и загрузите её в «Журнал и отчёты» → «Сверка с 1С»: робот покажет расхождения.</li><li>После сверки главный бухгалтер закрывает месяц — проведения и отмены за него блокируются.</li></ol></div>`;
 }
-function parseNotaries(text){const T=splitDelim(text);const hi=T.findIndex(r=>r.some(c=>/фио|нотариус|наимен/i.test(c)));if(hi<0)return {err:"Нужна строка заголовка со столбцом «ФИО» (и, если есть, «ИНН», «Нотариальный округ», «Взнос в месяц»)"};
-  const h=T[hi].map(x=>x.toLowerCase());const f=re=>h.findIndex(x=>re.test(x));const C={name:f(/фио|нотариус|наимен/),inn:f(/инн/),dist:f(/округ|район/),fee:f(/взнос|сумм/)};
-  const rows=[];for(const r of T.slice(hi+1)){const inn=C.inn>=0?(String(r[C.inn]||"").match(/\d{10,12}/)||[""])[0]:"";const name=String(r[C.name]||"").trim();if(!name)continue;rows.push({inn,name,district:C.dist>=0?String(r[C.dist]||"").trim():"",fee:C.fee>=0?num(r[C.fee]):0})}
+function parseNotaries(text){const T=splitDelim(text);const hi=T.findIndex(r=>r.some(c=>/фио|нотариус|наимен/i.test(c)));if(hi<0)return {err:"Нужна строка заголовка со столбцом «ФИО» (и, если есть, «ИНН», «Нотариальный округ», «Взнос в месяц», «Начало полномочий», «Окончание полномочий»)"};
+  const h=T[hi].map(x=>x.toLowerCase());const f=re=>h.findIndex(x=>re.test(x));const C={name:f(/фио|нотариус|наимен/),inn:f(/инн/),dist:f(/округ|район/),fee:f(/взнос|сумм/),start:f(/начал|назнач/),end:f(/оконч|прекращ|сложен/)};
+  const dt=v=>{const d=parseDate(normDate(v));return d?d.toLocaleDateString("ru-RU"):""};
+  const rows=[];for(const r of T.slice(hi+1)){const inn=C.inn>=0?(String(r[C.inn]||"").match(/\d{10,12}/)||[""])[0]:"";const name=String(r[C.name]||"").trim();if(!name)continue;const fees=C.fee>=0?parseFees(r[C.fee]):[];
+    rows.push({inn,name,district:C.dist>=0?String(r[C.dist]||"").trim():"",fees,fee:fees.length?fees[fees.length-1].fee:0,start:C.start>=0?dt(r[C.start]):"",end:C.end>=0?dt(r[C.end]):""})}
   return {rows}}
 document.addEventListener("input",e=>{if(e.target.id==="notPaste"){const P=parseNotaries(e.target.value);$("#notInfo").textContent=P.err||`Распознано нотариусов: ${P.rows.length}`}
   const t=e.target;if(t.dataset.ad){const L=t.dataset.ad==="in"?cfg.artIn:cfg.artOut;L[+t.dataset.ai][t.dataset.af]=t.value}});
 document.addEventListener("click",async e=>{const t=e.target.closest("button");if(!t)return;
   if(t.id==="notSave"){const P=parseNotaries($("#notPaste").value);if(P.err||!P.rows.length){toast(P.err||"Нет строк");return}t.disabled=true;let n=0;
     const byName={};Object.entries(notaries).forEach(([k,x])=>byName[nName(x.name)]=k);
-    const ops=P.rows.map(r=>{const id=byName[nName(r.name)]||notByInn(r.inn)||r.inn||("n_"+fnv(nName(r.name)));const old=notaries[id]||{};const body={name:r.name,inn:r.inn||old.inn||"",district:r.district||old.district||"",fee:r.fee||old.fee||0,at:new Date().toISOString(),by:uid||""};return db.doc("notaries/"+id).set(body).then(()=>n++).catch(()=>{})});await Promise.all(ops);toast(`Сохранено нотариусов: ${n}`);return}
+    const ops=P.rows.map(r=>{const id=byName[nName(r.name)]||notByInn(r.inn)||r.inn||("n_"+fnv(nName(r.name)));const old=notaries[id]||{};const body={name:r.name,inn:r.inn||old.inn||"",district:r.district||old.district||"",fees:r.fees.length?r.fees:(old.fees||[]),fee:r.fee||old.fee||0,start:r.start||old.start||"",end:r.end||old.end||"",at:new Date().toISOString(),by:uid||""};return db.doc("notaries/"+id).set(body).then(()=>n++).catch(()=>{})});await Promise.all(ops);await logA("Справочник нотариусов",{count:n});t.disabled=false;toast(n?`Сохранено нотариусов: ${n}`:"Не сохранено: нужны права главного бухгалтера");return}
   if(t.dataset.addart){(t.dataset.addart==="in"?cfg.artIn:cfg.artOut).splice(-1,0,{name:"Новая статья",acc:"",kw:""});renderRefs();return}
   if(t.id==="cfgReset"){cfg.artIn=JSON.parse(JSON.stringify(ART_IN));cfg.artOut=JSON.parse(JSON.stringify(ART_OUT));renderRefs();toast("Статьи по умолчанию — не забудьте сохранить");return}
   if(t.id==="cfgSave"){cfg.org=$("#cOrg").value.trim();cfg.inn=$("#cInn").value.trim();cfg.acc=$("#cAcc").value.trim();
-    try{await db.doc("config/main").set({org:cfg.org,inn:cfg.inn,acc:cfg.acc,artIn:cfg.artIn,artOut:cfg.artOut,at:new Date().toISOString(),by:uid||""});toast("Сохранено")}catch(err){toast("Не сохранено: "+(err?.code||""))}return}
+    try{await db.doc("config/main").set({org:cfg.org,inn:cfg.inn,acc:cfg.acc,artIn:cfg.artIn,artOut:cfg.artOut,at:new Date().toISOString(),by:uid||""});await logA("Настройки и статьи",{});toast("Сохранено")}catch(err){toast("Не сохранено: "+(err?.code||""))}return}
 });
 
 /* ===== старт ===== */
@@ -534,12 +605,14 @@ render();
   $("#banner").hidden=true;
   try{uid=await user?.id()||""}catch(e){}
   try{const w=await user?.can?.("data.write");if(w===false)canWrite=false}catch(e){}
+  try{isChief=!!(await user?.canEdit?.())}catch(e){}
+  db.doc("config/periods").onSnapshot(sn=>{periods=sn.exists?(sn.data().closed||{}):{};recheck();render()},()=>{});
   db.doc("config/main").onSnapshot(s=>{if(s.exists){const d=s.data();cfg={...cfg,...d,artIn:(d.artIn&&d.artIn.length)?d.artIn:cfg.artIn,artOut:(d.artOut&&d.artOut.length)?d.artOut:cfg.artOut}}if(view!=="refs")render()},()=>{});
   let baseNot={},ownNot={};const mergeNot=()=>{notaries={...baseNot};Object.entries(ownNot).forEach(([k,x])=>{notaries[k]={...(notaries[k]||{}),...x}});if(view!=="refs"||!document.activeElement||document.activeElement.id!=="notPaste")render()};
   db.doc("refs/monp").onSnapshot(s=>{baseNot={};refInfo=null;if(s.exists){refInfo=s.data();(refInfo.list||[]).forEach(x=>{const id="n_"+fnv(nName(x.name));baseNot[id]={name:x.name,district:x.district||"",inn:"",fee:0}})}mergeNot()},()=>{});
   db.collection("notaries").onSnapshot(s=>{ownNot={};s.docs.forEach(d=>{ownNot[d.id]=d.data()});mergeNot()},()=>{});
   db.collection("rules").onSnapshot(s=>{rules={};s.docs.forEach(d=>rules[d.id]=d.data())},()=>{});
-  db.collection("postings").onSnapshot(s=>{postings=s.docs.map(d=>({id:d.id,...d.data()}));posted=new Set(postings.map(p=>p.id));recheck();if(view==="journal"||view==="bank")render()},()=>{});
+  db.collection("postings").onSnapshot(s=>{postings=s.docs.map(d=>({id:d.id,...d.data()}));posted=new Set(postings.filter(p=>!p.cancelled).map(p=>p.id));recheck();if(view==="journal"||view==="bank")render()},()=>{});
 })();
 </script>
 
