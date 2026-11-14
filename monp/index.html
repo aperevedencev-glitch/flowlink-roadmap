@@ -75,6 +75,12 @@ tr.done{opacity:.6}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:14px}
 details summary{cursor:pointer;font-weight:500}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
+.logo{height:34px;width:auto;align-self:center;user-select:none}
+.intro{display:flex;gap:16px;align-items:flex-start}.intro>div{min-width:0;flex:1}
+.bot{height:96px;width:auto;flex:none;user-select:none;pointer-events:none}
+.bot-lg{height:130px}
+.done-msg{display:flex;gap:12px;align-items:center;border:1px solid var(--in);border-radius:9px;padding:8px 12px;background:color-mix(in srgb,var(--in) 8%,var(--surface))}.done-msg img{height:56px;width:auto}
+@media (max-width:560px){.intro{flex-direction:column}.bot{height:72px}.logo{height:28px}}
 @media (max-width:560px){h1{font-size:19px}input.f{width:120px}select.f{width:170px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -85,7 +91,7 @@ details summary{cursor:pointer;font-weight:500}
 
 <header>
   <div class="wrap">
-    <div class="hrow"><h1>Разнесение выписки</h1><span class="org" id="orgName">Московская областная нотариальная палата</span></div>
+    <div class="hrow"><img class="logo" src="robots/rocket.png" alt="Робот FlowLink"><h1>Разнесение выписки</h1><span class="org" id="orgName">Московская областная нотариальная палата</span></div>
     <nav class="tabs" role="tablist">
       <button class="tab" role="tab" data-v="bank" aria-selected="true">Выписка</button>
       <button class="tab" role="tab" data-v="journal">Журнал и отчёты</button>
@@ -353,7 +359,7 @@ const notByInn=inn=>{if(!inn)return "";const N=NOT();if(N[inn])return inn;return
 const STL={auto:"Авто",manual:"Вручную",check:"Проверить",none:"Не определено",done:"Уже разнесено"};
 function renderBank(){
   const el=$("#v-bank");const R=BK.rows;
-  const intro=`<div class="panel"><h2>Выписка за период</h2><p class="note" style="max-width:78ch">Загрузите выписку по расчётному счёту палаты: файл обмена с 1С из банк-клиента (<b>kl_to_1c.txt</b>) или таблицу из интернет-банка (<b>Excel / CSV</b>). Робот разнесёт поступления по нотариусам и статьям доходов, а списания — по статьям расходов, и запомнит ваши исправления. Готовое разнесение выгружается в Excel для загрузки в 1С.</p>
+  const intro=`<div class="panel"><div class="intro"><img class="bot" src="robots/point_r.png" alt=""><div><h2>Выписка за период</h2><p class="note" style="max-width:78ch">Загрузите выписку по расчётному счёту палаты: файл обмена с 1С из банк-клиента (<b>kl_to_1c.txt</b>) или таблицу из интернет-банка (<b>Excel / CSV</b>). Робот разнесёт поступления по нотариусам и статьям доходов, а списания — по статьям расходов, и запомнит ваши исправления. Готовое разнесение выгружается в Excel для загрузки в 1С.</p></div></div>
    <div class="drop" id="drop" style="margin-top:12px"><div class="row"><label class="btn pri" for="file" style="cursor:pointer">Выбрать файл выписки</label><input type="file" id="file" accept=".txt,.csv,.tsv,.xlsx,.xls" hidden><button class="btn" id="pasteBtn">Вставить строки из Excel</button><button class="btn" id="sampleBtn">Открыть пример</button>${R.length?`<button class="btn" id="clearBtn">Очистить</button>`:""}</div>
    <span class="note">Можно перетащить файл сюда. Повторная загрузка той же выписки ничего не задвоит.</span>
    <textarea class="f" id="paste" hidden placeholder="Скопируйте в Excel строки выписки вместе с заголовком (Дата, Дебет, Кредит, Контрагент, ИНН, Назначение) и вставьте сюда"></textarea></div>
@@ -364,9 +370,10 @@ function renderBank(){
   const inR=R.filter(r=>r.dir==="in"),outR=R.filter(r=>r.dir==="out");const s=a=>r2(a.reduce((x,y)=>x+y.sum,0));
   const pend=R.filter(r=>r.status!=="done");const cnt=k=>pend.filter(r=>k==="auto"?(r.status==="auto"||r.status==="manual"):r.status===k).length;
   const vis=R.filter(r=>(BK.dir==="all"||r.dir===BK.dir)&&(BK.st==="all"||(BK.st==="auto"?(r.status==="auto"||r.status==="manual"):r.status===BK.st)));
-  const sel=R.filter(r=>r.sel&&r.status!=="done");
+  const sel=R.filter(r=>r.sel&&r.status!=="done");const allDone=R.length&&R.every(r=>r.status==="done");
   const segD=(k,l)=>`<button data-dir="${k}" aria-pressed="${BK.dir===k}">${l}</button>`;const segS=(k,l,n)=>`<button data-st="${k}" aria-pressed="${BK.st===k}">${l}${n!=null?" · "+n:""}</button>`;
   el.innerHTML=intro+`<div class="sum"><div class="kv in"><span class="lbl">Поступления</span><b>${rub(s(inR))}</b><span class="note">${inR.length} платежей</span></div><div class="kv out"><span class="lbl">Списания</span><b>${rub(s(outR))}</b><span class="note">${outR.length} платежей</span></div><div class="kv"><span class="lbl">Разнесено роботом</span><b>${cnt("auto")}</b><span class="note">из ${pend.length} новых</span></div><div class="kv"><span class="lbl">Ждут решения</span><b>${cnt("check")+cnt("none")}</b><span class="note">проверить или выбрать статью</span></div></div>
+   ${allDone?`<div class="done-msg"><img src="robots/heart.png" alt=""><div><b>Выписка разнесена полностью.</b><div class="note">Выгрузите Excel для 1С — итоги уже в журнале.</div></div></div>`:""}
    <div class="panel"><div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="row"><div class="seg">${segD("all","Все")}${segD("in","Приход")}${segD("out","Расход")}</div><div class="seg">${segS("all","Все")}${segS("auto","Разнесено",cnt("auto"))}${segS("check","Проверить",cnt("check"))}${segS("none","Не определено",cnt("none"))}${R.some(r=>r.status==="done")?segS("done","Уже разнесено",R.filter(r=>r.status==="done").length):""}</div></div></div>
    <datalist id="notList">${notOpts()}</datalist>
    <div class="tbl"><table><thead><tr><th><input type="checkbox" id="selAll" aria-label="Отметить все видимые"></th><th>Дата, №</th><th>Контрагент</th><th class="num">Сумма</th><th>Назначение платежа</th><th>Статья · счёт</th><th>Нотариус</th><th>Период</th><th>Статус</th></tr></thead><tbody>
@@ -458,8 +465,8 @@ async function exportBank(){if(!window.JSZip){toast("Модуль Excel не з�
 let J={month:"",tab:"art",year:String(new Date().getFullYear())};
 function renderJournal(){
   const el=$("#v-journal");
-  if(!db){el.innerHTML=`<div class="panel empty"><h2>Журнал недоступен</h2><p>Хранилище не отвечает в этом окне. Откройте приложение на claude.ai.</p></div>`;return}
-  if(!postings.length){el.innerHTML=`<div class="panel empty"><h2>Пока ничего не проведено</h2><p>Загрузите выписку на вкладке «Выписка» и проведите разнесение — операции появятся здесь, с итогами по статьям и взносам нотариусов.</p></div>`;return}
+  if(!db){el.innerHTML=`<div class="panel empty"><img class="bot bot-lg" src="robots/question.png" alt=""><h2>Журнал недоступен</h2><p>Хранилище не отвечает в этом окне. Откройте приложение на claude.ai.</p></div>`;return}
+  if(!postings.length){el.innerHTML=`<div class="panel empty"><img class="bot bot-lg" src="robots/question.png" alt=""><h2>Пока ничего не проведено</h2><p>Загрузите выписку на вкладке «Выписка» и проведите разнесение — операции появятся здесь, с итогами по статьям и взносам нотариусов.</p></div>`;return}
   const months=[...new Set(postings.map(p=>p.ym).filter(Boolean))].sort().reverse();if(!J.month||!months.includes(J.month))J.month=months[0];
   const mname=m=>{const [y,mm]=m.split("-");return new Date(+y,+mm-1,1).toLocaleDateString("ru-RU",{month:"long",year:"numeric"})};
   const P=postings.filter(p=>p.ym===J.month);const s=a=>r2(a.reduce((x,y)=>x+y.sum,0));
